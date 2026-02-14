@@ -1,0 +1,62 @@
+package compiler
+
+import (
+	"context"
+
+	"github.com/nevalang/neva-lsp/internal/compiler/ir"
+	src "github.com/nevalang/neva-lsp/pkg/ast"
+	"github.com/nevalang/neva-lsp/pkg/core"
+)
+
+const (
+	ExternDirective    src.Directive = "extern"
+	BindDirective      src.Directive = "bind"
+	AutoportsDirective src.Directive = "autoports"
+)
+
+type (
+	Builder interface {
+		Build(ctx context.Context, workdir string) (RawBuild, string, *Error)
+	}
+	//nolint:govet // fieldalignment: keep semantic grouping.
+	RawBuild struct {
+		EntryModRef core.ModuleRef
+		Modules     map[core.ModuleRef]RawModule
+	}
+)
+
+type (
+	Parser interface {
+		ParseModules(rawMods map[core.ModuleRef]RawModule) (map[core.ModuleRef]src.Module, *Error)
+	}
+	RawModule struct {
+		Manifest src.ModuleManifest    // Manifest must be parsed by builder before passing into compiler
+		Packages map[string]RawPackage // Packages themselves on the other hand can be parsed by compiler
+	}
+	RawPackage map[string][]byte
+)
+
+type Analyzer interface {
+	Analyze(mod src.Build, mainPkgName string) (src.Build, *Error)
+}
+
+type Desugarer interface {
+	Desugar(build src.Build) (src.Build, error)
+}
+
+type Irgen interface {
+	Generate(build src.Build, mainPkgName string) (*ir.Program, error)
+	GenerateForComponent(build src.Build, pkgName, componentName string) (*ir.Program, error)
+}
+
+type Backend interface {
+	EmitExecutable(dst string, prog *ir.Program, trace bool) error
+	EmitLibrary(dst string, exports []LibraryExport, trace bool) error
+}
+
+//nolint:govet // fieldalignment: keep semantic grouping.
+type LibraryExport struct {
+	Name      string
+	Component src.Component
+	Program   *ir.Program
+}

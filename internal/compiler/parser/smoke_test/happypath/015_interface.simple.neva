@@ -1,0 +1,84 @@
+interface IReader1 () ()
+
+pub interface IReader1 () ()
+
+interface IReader8 (x int) ()
+
+interface IReader8 (
+    x int) ()
+
+interface IReader8 (
+    x int
+) ()
+
+interface IReader8 (
+    x int
+) (
+)
+
+interface IReader8 (x int) (
+
+)
+
+interface IReader8 (x int, y string) ()
+
+interface IReader8 (
+    x int, y string) ()
+
+interface IReader8 (x int,
+y string) ()
+
+interface IReader8 (
+    x int,
+    y string) ()
+
+interface IReader8 (
+    x int,
+    y string
+) ()
+
+interface IReader17 (x int) (a int)
+
+interface IReader17 (x int) (
+    a int)
+
+interface IReader17 (x int) (a int
+)
+
+interface IReader17 (x int) (
+    a int
+)
+
+interface IReader19 (x int, y string) (a int)
+
+interface IReader19 (
+    x int, y string
+) (a int)
+
+interface IReader19 (
+    x int, y string
+) (
+    a int
+)
+
+interface IReader19 (
+    x int,
+    y string
+) (
+    a int
+)
+
+pub interface IReader20 (x int, y string) (a int, b bool)
+
+pub interface IReader20 (x int, y string) (
+    a int,
+    b bool
+)
+
+pub interface IReader20 (
+    x int,
+    y string
+) (
+    a int,
+    b bool
+)

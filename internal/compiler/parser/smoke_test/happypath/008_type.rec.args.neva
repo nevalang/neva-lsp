@@ -1,0 +1,51 @@
+pub type Rec struct { foo vec<int> }
+
+pub type Rec struct {
+    foo vec<int>
+}
+
+pub type Rec struct {
+    foo vec<
+        int
+    >
+}
+
+pub type Rec struct {
+    foo vec<int>
+    bar dict<string, int>
+}
+
+pub type Rec struct {
+    foo dict<string, int>
+    bar vec<union { Monday, Tuesday, Wednesday, Thursday, Friday }>
+}
+
+pub type Rec struct {
+    foo dict<string, int>
+    bar vec<union {
+        Monday, Tuesday, Wednesday, Thursday, Friday }>
+}
+
+pub type Rec struct {
+    foo dict<string, int>
+    bar vec<union { Monday, Tuesday, Wednesday, Thursday, Friday
+    }>
+}
+
+pub type Rec struct {
+    foo dict<string, int>
+    bar vec<union {
+        Monday, Tuesday, Wednesday, Thursday, Friday
+    }>
+}
+
+pub type Rec struct {
+    foo dict<string, int>
+    bar vec<union {
+        Monday
+        Tuesday
+        Wednesday
+        Thursday
+        Friday
+    }>
+}

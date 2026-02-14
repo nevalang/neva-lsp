@@ -1,0 +1,408 @@
+package analyzer
+
+import (
+	"fmt"
+
+	"github.com/nevalang/neva-lsp/internal/compiler"
+	ts "github.com/nevalang/neva-lsp/internal/compiler/typesystem"
+	src "github.com/nevalang/neva-lsp/pkg/ast"
+	"github.com/nevalang/neva-lsp/pkg/core"
+)
+
+func (a Analyzer) analyzeReceivers(
+	receiverSide []src.ConnectionReceiver,
+	scope src.Scope,
+	iface src.Interface,
+	nodes map[string]src.Node,
+	nodesIfaces map[string]foundInterface,
+	nodesUsage map[string]netNodeUsage,
+	resolvedSenderTypes []*ts.Expr,
+	analyzedSenders []src.ConnectionSender,
+	net []src.Connection,
+	unionTags map[string]unionActiveTagInfo,
+) ([]src.ConnectionReceiver, *compiler.Error) {
+	analyzedReceivers := make([]src.ConnectionReceiver, 0, len(receiverSide))
+
+	for _, receiver := range receiverSide {
+		analyzedReceiver, err := a.analyzeReceiver(
+			receiver,
+			scope,
+			iface,
+			nodes,
+			nodesIfaces,
+			nodesUsage,
+			resolvedSenderTypes,
+			analyzedSenders,
+			net,
+			unionTags,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		analyzedReceivers = append(analyzedReceivers, *analyzedReceiver)
+	}
+
+	return analyzedReceivers, nil
+}
+
+func (a Analyzer) analyzeReceiver(
+	receiver src.ConnectionReceiver,
+	scope src.Scope,
+	iface src.Interface,
+	nodes map[string]src.Node,
+	nodesIfaces map[string]foundInterface,
+	nodesUsage map[string]netNodeUsage,
+	resolvedSenderTypes []*ts.Expr,
+	analyzedSenders []src.ConnectionSender,
+	net []src.Connection,
+	unionTags map[string]unionActiveTagInfo,
+) (*src.ConnectionReceiver, *compiler.Error) {
+	switch {
+	case receiver.PortAddr != nil:
+		err := a.analyzePortAddrReceiver(
+			*receiver.PortAddr,
+			scope,
+			iface,
+			nodes,
+			nodesIfaces,
+			nodesUsage,
+			resolvedSenderTypes,
+			analyzedSenders,
+			unionTags,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return &src.ConnectionReceiver{
+			PortAddr: receiver.PortAddr, // no need to change anything
+			Meta:     receiver.Meta,
+		}, nil
+	case receiver.ChainedConnection != nil:
+		analyzedChainedConn, err := a.analyzeChainedConnectionReceiver(
+			*receiver.ChainedConnection,
+			scope,
+			iface,
+			nodes,
+			nodesIfaces,
+			nodesUsage,
+			resolvedSenderTypes,
+			analyzedSenders,
+			net,
+			unionTags,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return &src.ConnectionReceiver{
+			ChainedConnection: &analyzedChainedConn,
+		}, nil
+	}
+
+	return nil, &compiler.Error{
+		Message: "Connection must have receiver-side",
+		Meta:    &receiver.Meta,
+	}
+}
+
+func (a Analyzer) analyzePortAddrReceiver(
+	portAddr src.PortAddr,
+	scope src.Scope,
+	iface src.Interface,
+	nodes map[string]src.Node,
+	nodesIfaces map[string]foundInterface,
+	nodesUsage map[string]netNodeUsage,
+	resolvedSenderTypes []*ts.Expr,
+	analyzedSenders []src.ConnectionSender,
+	unionTags map[string]unionActiveTagInfo,
+) *compiler.Error {
+	resolvedPortAddr, typeExpr, isArrPort, err := a.getReceiverPortType(
+		portAddr,
+		iface,
+		nodes,
+		nodesIfaces,
+		scope,
+	)
+	if err != nil {
+		return compiler.Error{
+			Meta: &portAddr.Meta,
+		}.Wrap(err)
+	}
+
+	if !isArrPort && portAddr.Idx != nil {
+		return &compiler.Error{
+			Message: "Index for non-array port",
+			Meta:    &portAddr.Meta,
+		}
+	}
+
+	if isArrPort && portAddr.Idx == nil {
+		return &compiler.Error{
+			Message: "Index needed for array inport",
+			Meta:    &portAddr.Meta,
+		}
+	}
+
+	// Validate all outer senders that feed the chain head (fan-in into the chain start).
+	// Example: [a, b] -> x -> y  => both a and b must be compatible with x's inport.
+	for i, resolvedSenderType := range resolvedSenderTypes {
+		if err := a.resolver.IsSubtypeOf(*resolvedSenderType, typeExpr, scope); err != nil {
+			return &compiler.Error{
+				Message: fmt.Sprintf(
+					"Incompatible types: %v -> %v: %v",
+					analyzedSenders[i], portAddr, err.Error(),
+				),
+				Meta: &portAddr.Meta,
+			}
+		}
+	}
+
+	// Union:data is a special receiver: validate payload types against the active tag.
+	if isUnionDataReceiver(portAddr, unionTags) {
+		if err := a.validateUnionDataReceiverPort(
+			portAddr,
+			analyzedSenders,
+			resolvedSenderTypes,
+			unionTags,
+			scope,
+		); err != nil {
+			return err
+		}
+	}
+
+	// sometimes port name is omitted and we need to resolve it first
+	// but it's important not to return it, so syntax sugar remains untouched
+	// otherwise desugarer won't be able to properly desugar such port-addresses
+	if err := netNodesUsage(nodesUsage).trackInportUsage(resolvedPortAddr); err != nil {
+		return &compiler.Error{
+			Message: err.Error(),
+			Meta:    &portAddr.Meta,
+		}
+	}
+
+	return nil
+}
+
+func (a Analyzer) analyzeChainedConnectionReceiver(
+	chainedConn src.Connection,
+	scope src.Scope,
+	iface src.Interface,
+	nodes map[string]src.Node,
+	nodesIfaces map[string]foundInterface,
+	nodesUsage map[string]netNodeUsage,
+	resolvedSenderTypes []*ts.Expr,
+	analyzedSenders []src.ConnectionSender,
+	net []src.Connection,
+	unionTags map[string]unionActiveTagInfo,
+) (src.Connection, *compiler.Error) {
+	// Chain head fan-in is intentionally disallowed to keep semantics simple.
+	if len(chainedConn.Senders) != 1 {
+		return src.Connection{}, &compiler.Error{
+			Message: "chained connection head must have exactly one sender (fan-in is not supported there yet)",
+			Meta:    &chainedConn.Meta,
+		}
+	}
+
+	chainHeadSender := chainedConn.Senders[0]
+
+	chainHeadType, err := a.getChainHeadInputType(
+		chainHeadSender,
+		nodes,
+		nodesIfaces,
+		scope,
+	)
+	if err != nil {
+		return src.Connection{}, err
+	}
+
+	for i, resolvedSenderType := range resolvedSenderTypes {
+		if err := a.resolver.IsSubtypeOf(*resolvedSenderType, chainHeadType, scope); err != nil {
+			return src.Connection{}, &compiler.Error{
+				Message: fmt.Sprintf(
+					"Incompatible types: %v -> %v: %v",
+					analyzedSenders[i], chainHeadSender, err.Error(),
+				),
+				Meta: &chainedConn.Meta,
+			}
+		}
+	}
+
+	// Chain head is a receiver for the outer senders; recursive analysis treats it as sender,
+	// so we must validate Union:data here to avoid skipping the receiver-side check.
+	if chainHeadSender.PortAddr != nil && isUnionDataReceiver(*chainHeadSender.PortAddr, unionTags) {
+		if err := a.validateUnionDataReceiverPort(
+			*chainHeadSender.PortAddr,
+			analyzedSenders,
+			resolvedSenderTypes,
+			unionTags,
+			scope,
+		); err != nil {
+			return src.Connection{}, err
+		}
+	}
+
+	analyzedChainedConn, err := a.analyzeConnection(
+		chainedConn,
+		iface,
+		nodes,
+		nodesIfaces,
+		scope,
+		nodesUsage,
+		analyzedSenders,
+		net,
+		unionTags,
+	)
+	if err != nil {
+		return src.Connection{}, err
+	}
+
+	if chainHeadSender.PortAddr != nil {
+		if err := netNodesUsage(nodesUsage).trackInportUsage(*chainHeadSender.PortAddr); err != nil {
+			return src.Connection{}, &compiler.Error{
+				Message: err.Error(),
+				Meta:    &chainedConn.Meta,
+			}
+		}
+	}
+
+	return analyzedChainedConn, nil
+}
+
+// isUnionDataReceiver reports whether a port address targets Union:data with a known active tag.
+func isUnionDataReceiver(
+	portAddr src.PortAddr,
+	unionActiveTags map[string]unionActiveTagInfo,
+) bool {
+	if portAddr.Port != "data" {
+		return false
+	}
+	_, ok := unionActiveTags[portAddr.Node]
+	return ok
+}
+
+// getReceiverPortType returns resolved port-addr, type expr and isArray bool.
+// Resolved port is equal to the given one unless it was an "" empty string.
+func (a Analyzer) getReceiverPortType(
+	receiverSide src.PortAddr,
+	iface src.Interface,
+	nodes map[string]src.Node,
+	nodesIfaces map[string]foundInterface,
+	scope src.Scope,
+) (src.PortAddr, ts.Expr, bool, *compiler.Error) {
+	if receiverSide.Node == "in" {
+		return src.PortAddr{}, ts.Expr{}, false, &compiler.Error{
+			Message: "Component cannot read from self inport",
+			Meta:    &receiverSide.Meta,
+		}
+	}
+
+	if receiverSide.Node == "out" {
+		outports := iface.IO.Out
+
+		outport, ok := outports[receiverSide.Port]
+		if !ok {
+			return src.PortAddr{}, ts.Expr{}, false, &compiler.Error{
+				Message: fmt.Sprintf("Referenced inport not found in component's interface: %v", receiverSide.Port),
+				Meta:    &receiverSide.Meta,
+			}
+		}
+
+		resolvedOutportType, err := a.resolver.ResolveExprWithFrame(
+			outport.TypeExpr,
+			iface.TypeParams.ToFrame(),
+			scope,
+		)
+		if err != nil {
+			return src.PortAddr{}, ts.Expr{}, false, &compiler.Error{
+				Message: err.Error(),
+				Meta:    &receiverSide.Meta,
+			}
+		}
+
+		return receiverSide, resolvedOutportType, outport.IsArray, nil
+	}
+
+	resolvedReceiver, nodeInportType, isArray, err := a.getNodeInportType(
+		receiverSide, nodes, nodesIfaces, scope,
+	)
+	if err != nil {
+		return src.PortAddr{}, ts.Expr{}, false, compiler.Error{
+			Meta: &receiverSide.Meta,
+		}.Wrap(err)
+	}
+
+	return resolvedReceiver, nodeInportType, isArray, nil
+}
+
+// getNodeInportType returns resolved port-addr, type expr and isArray bool.
+// Resolved port is equal to the given one unless it was an "" empty string.
+func (a Analyzer) getNodeInportType(
+	portAddr src.PortAddr,
+	nodes map[string]src.Node,
+	nodesIfaces map[string]foundInterface,
+	scope src.Scope,
+) (src.PortAddr, ts.Expr, bool, *compiler.Error) {
+	node, ok := nodes[portAddr.Node]
+	if !ok {
+		return src.PortAddr{}, ts.Expr{}, false, &compiler.Error{
+			Message: fmt.Sprintf("Node not found '%v'", portAddr.Node),
+			Meta:    &portAddr.Meta,
+		}
+	}
+
+	nodeIface, ok := nodesIfaces[portAddr.Node]
+	if !ok {
+		return src.PortAddr{}, ts.Expr{}, false, &compiler.Error{
+			Message: fmt.Sprintf("Referenced node not found: %v", portAddr.Node),
+			Meta:    &portAddr.Meta,
+		}
+	}
+
+	resolvedPortAddr, resolvedInportType, isArray, err := a.getResolvedPortType(
+		nodeIface.iface.IO.In,
+		nodeIface.iface.TypeParams.Params,
+		portAddr,
+		node,
+		scope.Relocate(nodeIface.location),
+		true,
+	)
+	if err != nil {
+		return src.PortAddr{}, ts.Expr{}, false, compiler.Error{
+			Meta: &portAddr.Meta,
+		}.Wrap(err)
+	}
+
+	return resolvedPortAddr, resolvedInportType, isArray, nil
+}
+
+func (Analyzer) getStructSelectorInportType(chainHead src.ConnectionSender) ts.Expr {
+	// build nested struct type for selectors
+	typeExpr := ts.Expr{
+		Lit: &ts.LitExpr{
+			Struct: make(map[string]ts.Expr),
+		},
+	}
+
+	currentStruct := typeExpr.Lit.Struct
+	for i, selector := range chainHead.StructSelector {
+		if i == len(chainHead.StructSelector)-1 {
+			// last selector, use any type
+			currentStruct[selector] = ts.Expr{
+				Inst: &ts.InstExpr{
+					Ref: core.EntityRef{Name: "any"},
+				},
+			}
+		} else {
+			// create nested struct
+			nestedStruct := make(map[string]ts.Expr)
+			currentStruct[selector] = ts.Expr{
+				Lit: &ts.LitExpr{
+					Struct: nestedStruct,
+				},
+			}
+			currentStruct = nestedStruct
+		}
+	}
+
+	return typeExpr
+}

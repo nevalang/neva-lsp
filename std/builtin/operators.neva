@@ -1,0 +1,135 @@
+// === UNARY ===
+
+// Not sends true if data is false, and false if data is true.
+#extern(not)
+pub def Not(data bool) (res bool)
+
+// Inc increments data by 1 and sends to result. Can be used with streams.Map.
+#extern(int_inc)
+pub def Inc(data int) (res int)
+#extern(float_inc)
+pub def Inc(data float) (res float)
+
+// Dec decrements data by 1 and sends to result. Can be used with streams.Map.
+#extern(int_dec)
+pub def Dec(data int) (res int)
+#extern(float_dec)
+pub def Dec(data float) (res float)
+
+// Neg negates data and sends to result. Can be used with streams.Map.
+#extern(int_neg)
+pub def Neg(data int) (res int)
+#extern(float_neg)
+pub def Neg(data float) (res float)
+
+// === BINARY ===
+
+// --- Arithmetic ---
+
+// Add sums left with right and sends to result. It can be used with Reduce.
+#extern(int_add)
+pub def Add(left int, right int) (res int)
+#extern(float_add)
+pub def Add(left float, right float) (res float)
+#extern(string_add)
+pub def Add(left string, right string) (res string)
+
+// Sub subtracts right from left and sends to result. It can be used with Reduce.
+#extern(int_sub)
+pub def Sub(left int, right int) (res int)
+#extern(float_sub)
+pub def Sub(left float, right float) (res float)
+
+// Mul multiplies left with right and sends to result. It can be used with Reduce.
+#extern(int_mul)
+pub def Mul(left int, right int) (res int)
+#extern(float_mul)
+pub def Mul(left float, right float) (res float)
+
+// Div divides left by right and sends to result. It can be used with Reduce.
+#extern(int_div)
+pub def Div(left int, right int) (res int)
+#extern(float_div)
+pub def Div(left float, right float) (res float)
+
+// Mod calculates num modulo den and sends to result.
+#extern(int_mod)
+pub def Mod(left int, right int) (res int)
+
+// Pow raises left to the power of right and sends to result.
+#extern(int_pow)
+pub def Pow(left int, right int) (res int)
+
+// --- Comparison ---
+
+// Eq sends true if left is equal to right, otherwise false.
+#extern(eq)
+pub def Eq<T>(left T, right T) (res bool)
+
+// Ne sends true if left is not equal to right, otherwise false.
+#extern(ne)
+pub def Ne<T>(left T, right T) (res bool)
+
+// Gt sends true if left is greater than right, otherwise false.
+#extern(int_is_greater)
+pub def Gt(left int, right int) (res bool)
+#extern(float_is_greater)
+pub def Gt(left float, right float) (res bool)
+#extern(string_is_greater)
+pub def Gt(left string, right string) (res bool)
+
+// Lt sends true if left is lesser than right, otherwise false.
+#extern(int_is_lesser)
+pub def Lt(left int, right int) (res bool)
+#extern(float_is_lesser)
+pub def Lt(left float, right float) (res bool)
+#extern(string_is_lesser)
+pub def Lt(left string, right string) (res bool)
+
+// Ge sends true if left is greater than or equal to right, otherwise false.
+#extern(int_is_greater_or_equal)
+pub def Ge(left int, right int) (res bool)
+#extern(float_is_greater_or_equal)
+pub def Ge(left float, right float) (res bool)
+#extern(string_is_greater_or_equal)
+pub def Ge(left string, right string) (res bool)
+
+// Le sends true if left is lesser than or equal to right, otherwise false.
+#extern(int_is_lesser_or_equal)
+pub def Le(left int, right int) (res bool)
+#extern(float_is_lesser_or_equal)
+pub def Le(left float, right float) (res bool)
+#extern(string_is_lesser_or_equal)
+pub def Le(left string, right string) (res bool)
+
+// --- Logical ---
+
+// And sends true if both left and right are true, otherwise false.
+#extern(and)
+pub def And(left bool, right bool) (res bool)
+
+// Or sends true if either left or right are true, otherwise false.
+#extern(or)
+pub def Or(left bool, right bool) (res bool)
+
+// --- Bitwise ---
+
+// And performs a binary AND on each bit of two numbers.
+#extern(int_bitwise_and)
+pub def BitAnd(left int, right int) (res int)
+
+// Or performs a binary OR on each bit of two numbers.
+#extern(int_bitwise_or) 
+pub def BitOr(left int, right int) (res int)
+
+// Xor performs a binary XOR on each bit of two numbers.
+#extern(int_bitwise_xor)
+pub def BitXor(left int, right int) (res int)
+
+// Lsh shifts bits to the left, filling with zeros.
+#extern(int_bitwise_lsh)
+pub def BitLsh(left int, right int) (res int)
+
+// Rsh shifts bits to the right, preserving the sign bit.
+#extern(int_bitwise_rsh)
+pub def BitRsh(left int, right int) (res int)

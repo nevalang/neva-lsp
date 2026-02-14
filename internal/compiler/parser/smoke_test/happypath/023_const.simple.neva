@@ -1,0 +1,47 @@
+const pi f32 = 3.14
+
+pub const pi f32 = 3.14
+
+const pi f32 = 3.14
+
+const magic_num i8 = 42
+
+const pi f32 = 3.14
+
+const VEC list<i8> = []
+
+const VEC list<i8> = [1, 2, 3, 4]
+
+const REC struct {} = {}
+
+const REC struct { foo int } = { foo: 42 }
+
+const REC struct {
+    foo int
+    bar list<i8>
+} = {
+    foo: 42,
+    bar: [1, 2, 3, 4]
+}
+
+const ENUM union { Monday, Tuesday } = 4
+
+const ENUM union {
+    Monday, Tuesday } = 5
+
+const ENUM union { Monday, Tuesday } = 6
+
+const ENUM union {
+    Monday, Tuesday
+} = 7
+
+const ENUM union {
+    Monday
+    Tuesday
+} = 8
+
+const UNION union { Int int, String string } = UNION::Int(42)
+
+pub const UNION union { Int int, String string } = UNION::String('hello!')
+
+const msg string = 'hello!'

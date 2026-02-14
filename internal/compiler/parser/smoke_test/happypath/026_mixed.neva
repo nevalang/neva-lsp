@@ -1,0 +1,29 @@
+import {
+	std:io
+}
+
+type useId int
+type money float
+type userName string
+type isAdmin bool
+
+const pi float = 3.14
+const magicNum int = 42
+
+interface IReader (path string) (i int, e err)
+interface IWriter (path string) (i int, anything any)
+
+def Main(start any) (stop any) {
+	abs IReader
+	concrete  Scanner
+	---
+	:start -> abs:v
+	abs:v -> [concrete:v]
+	concrete:v -> :code
+}
+
+def Wrap([data]) (res) {
+	fanIn FanIn
+	---
+	:data[*] -> fanIn:data[*]
+}
