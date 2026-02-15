@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/nevalang/neva-lsp/cmd/lsp/indexer"
-	"github.com/nevalang/neva-lsp/pkg"
+	"github.com/nevalang/neva/pkg"
+	"github.com/nevalang/neva/pkg/indexer"
 	"github.com/tliron/commonlog"
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"

@@ -1,6 +1,0 @@
-type MyInt int
-
-pub type MyStr string
-
-type MyInt int
-pub type MyStr string

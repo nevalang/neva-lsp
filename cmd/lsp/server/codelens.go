@@ -11,8 +11,8 @@ import (
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
-	src "github.com/nevalang/neva-lsp/pkg/ast"
-	"github.com/nevalang/neva-lsp/pkg/core"
+	src "github.com/nevalang/neva/pkg/ast"
+	"github.com/nevalang/neva/pkg/core"
 )
 
 type codeLensData struct {
