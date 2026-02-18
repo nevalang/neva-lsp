@@ -43,6 +43,10 @@ func (s *Server) TextDocumentCodeLens(
 
 	fileCtx, err := s.findFile(build, params.TextDocument.URI)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("textDocument/codeLens", params.TextDocument.URI, err)
+			return []protocol.CodeLens{}, nil
+		}
 		return nil, err
 	}
 
@@ -99,6 +103,10 @@ func (s *Server) CodeLensResolve(
 
 	fileCtx, err := s.findFile(build, parsedCodeLensData.URI)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("codeLens/resolve", parsedCodeLensData.URI, err)
+			return lens, nil
+		}
 		return nil, err
 	}
 
