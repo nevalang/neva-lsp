@@ -3,12 +3,10 @@ package main
 import (
 	"flag"
 
+	"github.com/nevalang/neva/pkg/indexer"
 	"github.com/tliron/commonlog"
 	_ "github.com/tliron/commonlog/simple"
 	"github.com/tliron/glsp/server"
-
-	lspServer "github.com/nevalang/neva-lsp/cmd/lsp/server"
-	"github.com/nevalang/neva/pkg/indexer"
 )
 
 func main() {
@@ -27,7 +25,7 @@ func main() {
 
 	indexer := indexer.MustNewDefault(logger)
 
-	handler := lspServer.BuildHandler(logger, serverName, indexer)
+	handler := BuildHandler(logger, serverName, indexer)
 
 	srv := server.NewServer(
 		handler,
