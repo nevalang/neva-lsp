@@ -59,6 +59,10 @@ func (s *Server) TextDocumentSemanticTokensFull(
 
 	fileCtx, err := s.findFile(build, params.TextDocument.URI)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("textDocument/semanticTokens/full", params.TextDocument.URI, err)
+			return &protocol.SemanticTokens{Data: []uint32{}}, nil
+		}
 		return nil, err
 	}
 

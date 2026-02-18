@@ -1,11 +1,13 @@
 package main
 
 import (
+	"math"
 	"sync"
 	"testing"
 
 	src "github.com/nevalang/neva/pkg/ast"
 	"github.com/nevalang/neva/pkg/core"
+	"github.com/nevalang/neva/pkg/indexer"
 	ts "github.com/nevalang/neva/pkg/typesystem"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
@@ -265,6 +267,146 @@ func TestCodeLensResolveForInterfaceReferences(t *testing.T) {
 	// One explicit const reference + one implementing component.
 	if resolvedLens.Command.Title != "2 references" {
 		t.Fatalf("CodeLensResolve() title=%q, want %q", resolvedLens.Command.Title, "2 references")
+	}
+}
+
+func TestCreateDiagnosticsRangeSanitization(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{}
+
+	tests := []struct {
+		name string
+		meta *core.Meta
+		want protocol.Range
+	}{
+		{
+			name: "meta_nil_uses_default_range",
+			meta: nil,
+			want: protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 0},
+				End:   protocol.Position{Line: 0, Character: 1},
+			},
+		},
+		{
+			name: "start_and_stop_zero_uses_default_range",
+			meta: &core.Meta{
+				Start: core.Position{Line: 0, Column: 0},
+				Stop:  core.Position{Line: 0, Column: 0},
+			},
+			want: protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 0},
+				End:   protocol.Position{Line: 0, Character: 1},
+			},
+		},
+		{
+			name: "valid_start_and_stop_are_converted_to_lsp_zero_based_lines",
+			meta: &core.Meta{
+				Start: core.Position{Line: 3, Column: 4},
+				Stop:  core.Position{Line: 3, Column: 10},
+			},
+			want: protocol.Range{
+				Start: protocol.Position{Line: 2, Character: 4},
+				End:   protocol.Position{Line: 2, Character: 10},
+			},
+		},
+		{
+			name: "stop_zero_falls_back_to_next_character_from_start",
+			meta: &core.Meta{
+				Start: core.Position{Line: 5, Column: 7},
+				Stop:  core.Position{Line: 0, Column: 0},
+			},
+			want: protocol.Range{
+				Start: protocol.Position{Line: 4, Character: 7},
+				End:   protocol.Position{Line: 4, Character: 8},
+			},
+		},
+		{
+			name: "negative_start_values_use_default_range",
+			meta: &core.Meta{
+				Start: core.Position{Line: -1, Column: -3},
+				Stop:  core.Position{Line: -1, Column: -1},
+			},
+			want: protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 0},
+				End:   protocol.Position{Line: 0, Character: 1},
+			},
+		},
+		{
+			name: "large_values_are_clamped_without_underflow",
+			meta: &core.Meta{
+				Start: core.Position{Line: math.MaxInt, Column: math.MaxInt},
+				Stop:  core.Position{Line: math.MaxInt, Column: math.MaxInt},
+			},
+			want: protocol.Range{
+				Start: protocol.Position{Line: math.MaxUint32, Character: math.MaxUint32},
+				End:   protocol.Position{Line: math.MaxUint32, Character: math.MaxUint32},
+			},
+		},
+	}
+
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			params := server.createDiagnostics(indexer.Error{
+				Meta:    testCase.meta,
+				Message: "boom",
+			}, "file:///tmp/main.neva")
+
+			if len(params.Diagnostics) != 1 {
+				t.Fatalf("createDiagnostics() diagnostics=%d, want 1", len(params.Diagnostics))
+			}
+			gotRange := params.Diagnostics[0].Range
+			if gotRange != testCase.want {
+				t.Fatalf("createDiagnostics() range=%+v, want %+v", gotRange, testCase.want)
+			}
+		})
+	}
+}
+
+func TestReadOnlyHandlersGracefulWhenFileMissingFromBuild(t *testing.T) {
+	t.Parallel()
+
+	server, _ := buildTestLSPServerWithSingleFile()
+	missingURI := pathToURI("/tmp/workspace/main/missing.neva")
+
+	docSymbolsResult, err := server.TextDocumentDocumentSymbol(nil, &protocol.DocumentSymbolParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: missingURI},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentDocumentSymbol() error = %v", err)
+	}
+	docSymbols, ok := docSymbolsResult.([]protocol.DocumentSymbol)
+	if !ok {
+		t.Fatalf("TextDocumentDocumentSymbol() type=%T, want []protocol.DocumentSymbol", docSymbolsResult)
+	}
+	if len(docSymbols) != 0 {
+		t.Fatalf("TextDocumentDocumentSymbol() len=%d, want 0", len(docSymbols))
+	}
+
+	tokens, err := server.TextDocumentSemanticTokensFull(nil, &protocol.SemanticTokensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: missingURI},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentSemanticTokensFull() error = %v", err)
+	}
+	if tokens == nil {
+		t.Fatalf("TextDocumentSemanticTokensFull() returned nil tokens")
+	}
+	if len(tokens.Data) != 0 {
+		t.Fatalf("TextDocumentSemanticTokensFull() data len=%d, want 0", len(tokens.Data))
+	}
+
+	lenses, err := server.TextDocumentCodeLens(nil, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: missingURI},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentCodeLens() error = %v", err)
+	}
+	if len(lenses) != 0 {
+		t.Fatalf("TextDocumentCodeLens() len=%d, want 0", len(lenses))
 	}
 }
 

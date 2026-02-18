@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	src "github.com/nevalang/neva/pkg/ast"
+	"github.com/nevalang/neva/pkg/core"
 	"github.com/nevalang/neva/pkg/indexer"
 )
 
@@ -104,31 +106,7 @@ func (s *Server) createDiagnostics(
 	indexerErr indexer.Error,
 	uri string,
 ) protocol.PublishDiagnosticsParams {
-	var startStopRange protocol.Range
-	if indexerErr.Meta != nil {
-		// If stop is 0 0, set it to the same as start but with character incremented by 1
-		start := indexerErr.Meta.Start
-		stop := indexerErr.Meta.Stop
-		if stop.Line == 0 && stop.Column == 0 {
-			stop = start
-			stop.Column++
-		}
-
-		startStopRange = protocol.Range{
-			Start: protocol.Position{
-				Line:      toUint32(start.Line),
-				Character: toUint32(start.Column),
-			},
-			End: protocol.Position{
-				Line:      toUint32(stop.Line),
-				Character: toUint32(stop.Column),
-			},
-		}
-
-		// Adjust for 0-based indexing
-		startStopRange.Start.Line--
-		startStopRange.End.Line--
-	}
+	startStopRange := diagnosticRange(indexerErr.Meta)
 
 	return protocol.PublishDiagnosticsParams{
 		URI: uri, // uri must be full path to the file, make sure all compiler errors include full location
@@ -144,17 +122,71 @@ func (s *Server) createDiagnostics(
 	}
 }
 
-func ptr[T any](v T) *T {
-	return &v
+func diagnosticRange(meta *core.Meta) protocol.Range {
+	defaultRange := protocol.Range{
+		Start: protocol.Position{Line: 0, Character: 0},
+		End:   protocol.Position{Line: 0, Character: 1},
+	}
+	if meta == nil {
+		return defaultRange
+	}
+
+	start, startOK := diagnosticStartPosition(meta.Start)
+	if !startOK {
+		return defaultRange
+	}
+
+	end, endOK := diagnosticStopPosition(meta.Start, meta.Stop)
+	if !endOK {
+		end = nextCharacterPosition(start)
+	}
+
+	if end.Line < start.Line || (end.Line == start.Line && end.Character < start.Character) {
+		end = nextCharacterPosition(start)
+	}
+
+	return protocol.Range{Start: start, End: end}
 }
 
-func toUint32(value int) uint32 {
-	if value < 0 {
-		return 0
+func diagnosticStartPosition(pos core.Position) (protocol.Position, bool) {
+	if pos.Line <= 0 {
+		return protocol.Position{}, false
 	}
-	if uint64(value) > uint64(^uint32(0)) {
-		return ^uint32(0)
+
+	return protocol.Position{
+		Line:      clampToUint32(pos.Line - 1),
+		Character: clampToUint32(pos.Column),
+	}, true
+}
+
+func diagnosticStopPosition(start core.Position, stop core.Position) (protocol.Position, bool) {
+	if stop.Line == 0 && stop.Column == 0 {
+		startPos, ok := diagnosticStartPosition(start)
+		if !ok {
+			return protocol.Position{}, false
+		}
+		return nextCharacterPosition(startPos), true
 	}
-	// #nosec G115 -- bounds checked above
-	return uint32(value)
+	if stop.Line <= 0 {
+		return protocol.Position{}, false
+	}
+
+	return protocol.Position{
+		Line:      clampToUint32(stop.Line - 1),
+		Character: clampToUint32(stop.Column),
+	}, true
+}
+
+func nextCharacterPosition(pos protocol.Position) protocol.Position {
+	if pos.Character == math.MaxUint32 {
+		return pos
+	}
+	return protocol.Position{
+		Line:      pos.Line,
+		Character: pos.Character + 1,
+	}
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
