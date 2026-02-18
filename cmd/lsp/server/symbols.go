@@ -4,6 +4,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -17,6 +18,8 @@ import (
 	"github.com/nevalang/neva/pkg/core"
 	ts "github.com/nevalang/neva/pkg/typesystem"
 )
+
+var errFileNotFoundInBuild = errors.New("file not found in build")
 
 type fileContext struct {
 	file        src.File
@@ -113,7 +116,18 @@ func (s *Server) findFile(build *src.Build, uri string) (*fileContext, error) {
 		return matchedCtx, nil
 	}
 
-	return nil, fmt.Errorf("file not found in build: %s", uri)
+	return nil, fmt.Errorf("%w: %s", errFileNotFoundInBuild, uri)
+}
+
+func isFileNotFoundInBuild(err error) bool {
+	return errors.Is(err, errFileNotFoundInBuild)
+}
+
+func (s *Server) logReadOnlyFileMiss(feature string, uri string, err error) {
+	if s.logger == nil {
+		return
+	}
+	s.logger.Info("read-only request skipped for file missing from index", "feature", feature, "uri", uri, "err", err)
 }
 
 // pathForLocation maps compiler source locations to workspace file paths.
@@ -435,6 +449,9 @@ func (s *Server) definitionLocations(
 
 	ctx, err := s.findFile(build, uri)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("textDocument/definition", uri, err)
+		}
 		return nil
 	}
 
@@ -495,6 +512,10 @@ func (s *Server) TextDocumentReferences(
 
 	ctx, err := s.findFile(build, params.TextDocument.URI)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("textDocument/references", params.TextDocument.URI, err)
+			return []protocol.Location{}, nil
+		}
 		return nil, err
 	}
 
@@ -688,6 +709,10 @@ func (s *Server) TextDocumentHover(
 	}
 	ctx, err := s.findFile(build, params.TextDocument.URI)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("textDocument/hover", params.TextDocument.URI, err)
+			return nil, nil
+		}
 		return nil, err
 	}
 
@@ -783,6 +808,10 @@ func (s *Server) TextDocumentDocumentSymbol(
 	}
 	ctx, err := s.findFile(build, params.TextDocument.URI)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("textDocument/documentSymbol", params.TextDocument.URI, err)
+			return []protocol.DocumentSymbol{}, nil
+		}
 		return nil, err
 	}
 

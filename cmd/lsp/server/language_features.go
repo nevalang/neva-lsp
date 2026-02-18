@@ -28,6 +28,10 @@ func (s *Server) TextDocumentCompletion(
 
 	ctx, err := s.findFile(build, params.TextDocument.URI)
 	if err != nil {
+		if isFileNotFoundInBuild(err) {
+			s.logReadOnlyFileMiss("textDocument/completion", params.TextDocument.URI, err)
+			return protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil
+		}
 		return nil, err
 	}
 
