@@ -1,7 +1,7 @@
 // Package server symbol helpers implement definition/reference/rename/hover/symbol lookups.
 // The core idea is: resolve cursor position to an entity reference, then map it back to
 // declaration and usage ranges across all workspace-resolved files.
-package server
+package main
 
 import (
 	"errors"

@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	src "github.com/nevalang/neva/pkg/ast"
