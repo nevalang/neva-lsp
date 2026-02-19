@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -698,6 +699,34 @@ func TestReadOnlyHandlersGracefulWhenFileMissingFromBuild(t *testing.T) {
 	}
 	if len(lenses) != 0 {
 		t.Fatalf("TextDocumentCodeLens() len=%d, want 0", len(lenses))
+	}
+}
+
+func TestSemanticTokensPresentForValidDocument(t *testing.T) {
+	t.Parallel()
+
+	mainFile := strings.TrimSpace(`
+pub type Id int
+
+def Main(start int) (stop int) {
+	dec Dec
+	---
+	:start -> dec -> :stop
+}
+`) + "\n"
+
+	server, docURI, _ := buildIndexedServerWithSingleMainFile(t, mainFile)
+	tokens, err := server.TextDocumentSemanticTokensFull(nil, &protocol.SemanticTokensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentSemanticTokensFull() error = %v", err)
+	}
+	if tokens == nil {
+		t.Fatal("TextDocumentSemanticTokensFull() returned nil tokens")
+	}
+	if len(tokens.Data) == 0 {
+		t.Fatal("TextDocumentSemanticTokensFull() returned empty token payload for valid document")
 	}
 }
 
