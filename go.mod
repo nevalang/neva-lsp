@@ -5,7 +5,7 @@ go 1.25
 toolchain go1.25.6
 
 require (
-	github.com/nevalang/neva v0.34.1-0.20260218184039-db5adfde91f5
+	github.com/nevalang/neva v0.34.1-0.20260219170217-3675acc6f947
 	github.com/tliron/commonlog v0.2.10
 	github.com/tliron/glsp v0.2.2
 )

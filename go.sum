@@ -70,6 +70,8 @@ github.com/muesli/termenv v0.15.2 h1:GohcuySI0QmI3wN8Ok9PtKGkgkFIk7y6Vpb5PvrY+Wo
 github.com/muesli/termenv v0.15.2/go.mod h1:Epx+iuz8sNs7mNKhxzH4fWXGNpZwUaJKRS1noLXviQ8=
 github.com/nevalang/neva v0.34.1-0.20260218184039-db5adfde91f5 h1:AlbT88GR9WwIYpblq3bBbKPWBM4sSnJ9gUbSu23tR9I=
 github.com/nevalang/neva v0.34.1-0.20260218184039-db5adfde91f5/go.mod h1:9WG6GNmgjiyeS0lFk4FR9O1PLO6oDu6nxriPDyjdMVs=
+github.com/nevalang/neva v0.34.1-0.20260219170217-3675acc6f947 h1:pu9Wdu66L2WGGFfmCpZsgpQBp1Q7eS+YoaflrxemJMc=
+github.com/nevalang/neva v0.34.1-0.20260219170217-3675acc6f947/go.mod h1:9WG6GNmgjiyeS0lFk4FR9O1PLO6oDu6nxriPDyjdMVs=
 github.com/onsi/gomega v1.27.10 h1:naR28SdDFlqrG6kScpT8VWpu1xWY5nJRCF3XaYyBjhI=
 github.com/onsi/gomega v1.27.10/go.mod h1:RsS8tutOdbdgzbPtzzATp12yT7kM5I5aElG3evPbQ0M=
 github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 h1:q2e307iGHPdTGp0hoxKjt1H5pDo6utceo3dQVK3I5XQ=
