@@ -9,6 +9,9 @@ func (s *Server) Initialize(glspCtx *glsp.Context, params *protocol.InitializePa
 	s.workspacePath = *params.RootPath
 
 	capabilities := s.handler.CreateServerCapabilities()
+	if capabilities.CodeLensProvider != nil {
+		capabilities.CodeLensProvider.ResolveProvider = ptr(true)
+	}
 	// Populate the legend so clients can map token type indices from responses.
 	if opts, ok := capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions); ok {
 		opts.Legend = semanticTokensLegend()

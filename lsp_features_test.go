@@ -2,6 +2,8 @@ package main
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -267,6 +269,223 @@ func TestCodeLensResolveForInterfaceReferences(t *testing.T) {
 	// One explicit const reference + one implementing component.
 	if resolvedLens.Command.Title != "2 references" {
 		t.Fatalf("CodeLensResolve() title=%q, want %q", resolvedLens.Command.Title, "2 references")
+	}
+}
+
+func TestCodeLensResolveHidesZeroReferenceLens(t *testing.T) {
+	t.Parallel()
+
+	server, docURI := buildTestLSPServerWithSingleFile()
+	lens := &protocol.CodeLens{
+		Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}},
+		Data: codeLensData{
+			URI:  docURI,
+			Name: "Answer",
+			Kind: codeLensKindReferences,
+		},
+	}
+
+	resolvedLens, err := server.CodeLensResolve(nil, lens)
+	if err != nil {
+		t.Fatalf("CodeLensResolve() error = %v", err)
+	}
+	if resolvedLens.Command != nil {
+		t.Fatalf("CodeLensResolve() command=%+v, want nil for zero references", resolvedLens.Command)
+	}
+}
+
+func TestTextDocumentCodeLensSkipsEmptyImplementationLens(t *testing.T) {
+	t.Parallel()
+
+	moduleRef := core.ModuleRef{Path: "@"}
+	interfaceMeta := core.Meta{Start: core.Position{Line: 1, Column: 0}, Stop: core.Position{Line: 1, Column: 7}}
+	build := src.Build{
+		Modules: map[core.ModuleRef]src.Module{
+			moduleRef: {
+				Packages: map[string]src.Package{
+					"main": {
+						"main": {
+							Entities: map[string]src.Entity{
+								"Greeter": {
+									Kind: src.InterfaceEntity,
+									Interface: src.Interface{
+										IO: src.IO{
+											In: map[string]src.Port{
+												"data": {TypeExpr: ts.Expr{Inst: &ts.InstExpr{Ref: core.EntityRef{Name: "int"}}}},
+											},
+											Out: map[string]src.Port{
+												"res": {TypeExpr: ts.Expr{Inst: &ts.InstExpr{Ref: core.EntityRef{Name: "bool"}}}},
+											},
+										},
+										Meta: interfaceMeta,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	server := &Server{
+		workspacePath: "/tmp/workspace",
+		indexMutex:    &sync.Mutex{},
+	}
+	server.setBuild(build)
+
+	docURI := pathToURI("/tmp/workspace/main/main.neva")
+	lenses, err := server.TextDocumentCodeLens(nil, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentCodeLens() error = %v", err)
+	}
+	if len(lenses) != 1 {
+		t.Fatalf("TextDocumentCodeLens() count=%d, want 1", len(lenses))
+	}
+	parsed, ok := parseCodeLensData(lenses[0].Data)
+	if !ok {
+		t.Fatalf("invalid code lens data payload: %#v", lenses[0].Data)
+	}
+	if parsed.Name != "Greeter" || parsed.Kind != codeLensKindReferences {
+		t.Fatalf("unexpected lens payload=%+v, want Greeter references only", parsed)
+	}
+}
+
+func TestComponentImplementsInterfaceWithTypeParameterWildcard(t *testing.T) {
+	t.Parallel()
+
+	interfaceDef := src.Interface{
+		TypeParams: src.TypeParams{
+			Params: []ts.Param{
+				{
+					Name: "T",
+					Constr: ts.Expr{
+						Inst: &ts.InstExpr{Ref: core.EntityRef{Name: "any"}},
+					},
+				},
+			},
+		},
+		IO: src.IO{
+			In: map[string]src.Port{
+				"data": {TypeExpr: ts.Expr{Inst: &ts.InstExpr{Ref: core.EntityRef{Name: "T"}}}},
+			},
+			Out: map[string]src.Port{
+				"res": {TypeExpr: ts.Expr{Inst: &ts.InstExpr{Ref: core.EntityRef{Name: "bool"}}}},
+			},
+		},
+	}
+
+	componentIO := src.IO{
+		In: map[string]src.Port{
+			"data": {TypeExpr: ts.Expr{Inst: &ts.InstExpr{Ref: core.EntityRef{Name: "int"}}}},
+		},
+		Out: map[string]src.Port{
+			"res": {TypeExpr: ts.Expr{Inst: &ts.InstExpr{Ref: core.EntityRef{Name: "bool"}}}},
+		},
+	}
+
+	if !componentImplementsInterface(componentIO, interfaceDef) {
+		t.Fatal("componentImplementsInterface() = false, want true for type-parameter wildcard match")
+	}
+}
+
+func TestRangeForEntityDeclarationFallbackWhenMetaMissing(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "types.neva")
+	content := "pub type any\npub type int\n"
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture file: %v", err)
+	}
+
+	entity := src.Entity{
+		Kind: src.TypeEntity,
+		Type: ts.Def{},
+	}
+
+	rng, ok := rangeForEntityDeclaration(entity, "int", filePath)
+	if !ok {
+		t.Fatal("rangeForEntityDeclaration() ok=false, want true")
+	}
+	if rng.Start.Line != 1 || rng.Start.Character != 9 {
+		t.Fatalf(
+			"rangeForEntityDeclaration() start=%d:%d, want 1:9",
+			rng.Start.Line,
+			rng.Start.Character,
+		)
+	}
+	if rng.End.Line != 1 || rng.End.Character != 12 {
+		t.Fatalf(
+			"rangeForEntityDeclaration() end=%d:%d, want 1:12",
+			rng.End.Line,
+			rng.End.Character,
+		)
+	}
+}
+
+func TestDocumentSymbolRangeUsesEntityBody(t *testing.T) {
+	t.Parallel()
+
+	moduleRef := core.ModuleRef{Path: "@"}
+	componentMeta := core.Meta{
+		Start: core.Position{Line: 1, Column: 0},
+		Stop:  core.Position{Line: 4, Column: 1},
+	}
+
+	build := src.Build{
+		Modules: map[core.ModuleRef]src.Module{
+			moduleRef: {
+				Packages: map[string]src.Package{
+					"main": {
+						"main": {
+							Entities: map[string]src.Entity{
+								"Main": {
+									Kind: src.ComponentEntity,
+									Component: []src.Component{
+										{
+											Interface: src.Interface{IO: src.IO{}},
+											Meta:      componentMeta,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	server := &Server{
+		workspacePath: "/tmp/workspace",
+		indexMutex:    &sync.Mutex{},
+	}
+	server.setBuild(build)
+
+	docSymbolsResult, err := server.TextDocumentDocumentSymbol(nil, &protocol.DocumentSymbolParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: pathToURI("/tmp/workspace/main/main.neva")},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentDocumentSymbol() error = %v", err)
+	}
+
+	docSymbols, ok := docSymbolsResult.([]protocol.DocumentSymbol)
+	if !ok {
+		t.Fatalf("TextDocumentDocumentSymbol() type=%T, want []protocol.DocumentSymbol", docSymbolsResult)
+	}
+	if len(docSymbols) != 1 {
+		t.Fatalf("TextDocumentDocumentSymbol() len=%d, want 1", len(docSymbols))
+	}
+
+	symbol := docSymbols[0]
+	if symbol.Range.End.Line <= symbol.SelectionRange.End.Line {
+		t.Fatalf(
+			"DocumentSymbol range end line=%d, selection end line=%d; want body range to extend beyond selection",
+			symbol.Range.End.Line,
+			symbol.SelectionRange.End.Line,
+		)
 	}
 }
 

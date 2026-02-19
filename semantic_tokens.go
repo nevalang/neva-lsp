@@ -77,12 +77,12 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext) [
 	tokens := make([]semanticToken, 0, len(fileCtx.file.Entities))
 
 	for name, entity := range fileCtx.file.Entities {
-		meta := entity.Meta()
-		if meta == nil {
-			continue
-		}
 		if tokenType, ok := entityTokenType(entity.Kind, typeIndex); ok {
-			tokens = append(tokens, makeToken(*meta, 0, len(name), tokenType))
+			if declarationRange, found := rangeForEntityDeclaration(entity, name, fileCtx.filePath); found {
+				if token, tokenOK := tokenFromRange(declarationRange, tokenType); tokenOK {
+					tokens = append(tokens, token)
+				}
+			}
 		}
 
 		if entity.Kind == src.ComponentEntity {
@@ -104,8 +104,10 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext) [
 		if !ok {
 			continue
 		}
-		offset := nameOffsetForRef(ref.meta)
-		tokens = append(tokens, makeToken(ref.meta, offset, len(resolved.name), tokenType))
+		refRange := entityRefNameRange(ref.meta, ref.ref)
+		if token, tokenOK := tokenFromRange(refRange, tokenType); tokenOK {
+			tokens = append(tokens, token)
+		}
 	}
 
 	// LSP expects monotonically ordered tokens before delta encoding.
@@ -117,6 +119,19 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext) [
 	})
 
 	return tokens
+}
+
+func tokenFromRange(r protocol.Range, tokenType int) (semanticToken, bool) {
+	if r.Start.Line != r.End.Line || r.End.Character <= r.Start.Character {
+		return semanticToken{}, false
+	}
+	return semanticToken{
+		line:      int(r.Start.Line),
+		start:     int(r.Start.Character),
+		length:    int(r.End.Character - r.Start.Character),
+		tokenType: tokenType,
+		modifiers: 0,
+	}, true
 }
 
 // tokenTypeIndex maps legend token names to numeric indices.

@@ -13,6 +13,7 @@ import (
 
 	src "github.com/nevalang/neva/pkg/ast"
 	"github.com/nevalang/neva/pkg/core"
+	ts "github.com/nevalang/neva/pkg/typesystem"
 )
 
 type codeLensData struct {
@@ -30,6 +31,8 @@ const (
 	codeLensKindReferences      codeLensKind = "references"
 	codeLensKindImplementations codeLensKind = "implementations"
 )
+
+const showReferencesClientCommand = "neva.showReferences"
 
 // TextDocumentCodeLens emits per-entity code lenses for references and, for interfaces, implementations.
 func (s *Server) TextDocumentCodeLens(
@@ -53,12 +56,11 @@ func (s *Server) TextDocumentCodeLens(
 	lenses := make([]protocol.CodeLens, 0, len(fileCtx.file.Entities)*2)
 	missingMetaCount := 0
 	for name, entity := range fileCtx.file.Entities {
-		meta := entity.Meta()
-		if meta == nil {
+		nameRange, ok := rangeForEntityDeclaration(entity, name, fileCtx.filePath)
+		if !ok {
 			missingMetaCount++
 			continue
 		}
-		nameRange := rangeForName(*meta, name, 0)
 		lenses = append(lenses, protocol.CodeLens{
 			Range: nameRange,
 			Data: codeLensData{
@@ -69,6 +71,13 @@ func (s *Server) TextDocumentCodeLens(
 		})
 
 		if entity.Kind == src.InterfaceEntity {
+			target, resolved := s.resolveEntityRef(build, fileCtx, core.EntityRef{Name: name})
+			if !resolved {
+				continue
+			}
+			if len(s.implementationLocationsForEntity(build, target)) == 0 {
+				continue
+			}
 			lenses = append(lenses, protocol.CodeLens{
 				Range: nameRange,
 				Data: codeLensData{
@@ -118,10 +127,18 @@ func (s *Server) CodeLensResolve(
 	switch parsedCodeLensData.Kind {
 	case codeLensKindImplementations:
 		locations := s.implementationLocationsForEntity(build, target)
+		if len(locations) == 0 {
+			lens.Command = nil
+			return lens, nil
+		}
 		title := fmt.Sprintf("%d implementations", len(locations))
 		lens.Command = buildShowReferencesCommand(parsedCodeLensData.URI, lens.Range.Start, locations, title)
 	case codeLensKindReferences:
 		locations := s.referenceLocationsForEntity(build, target)
+		if len(locations) == 0 {
+			lens.Command = nil
+			return lens, nil
+		}
 		title := fmt.Sprintf("%d references", len(locations))
 		lens.Command = buildShowReferencesCommand(parsedCodeLensData.URI, lens.Range.Start, locations, title)
 	default:
@@ -201,16 +218,20 @@ func (s *Server) implementationLocationsForInterface(build *src.Build, ifaceTarg
 				continue
 			}
 			for _, component := range entity.Component {
-				if !componentImplementsInterface(component.IO, interfaceDef.IO) {
+				if !componentImplementsInterface(component.IO, interfaceDef) {
 					continue
 				}
 				componentMeta := entity.Meta()
 				if componentMeta == nil {
 					continue
 				}
+				componentRange, ok := rangeForEntityDeclaration(entity, componentName, fileCtx.filePath)
+				if !ok {
+					componentRange = rangeForName(*componentMeta, componentName, 0)
+				}
 				location := protocol.Location{
 					URI:   pathToURI(fileCtx.filePath),
-					Range: rangeForName(*componentMeta, componentName, 0),
+					Range: componentRange,
 				}
 				if _, ok := seen[location]; ok {
 					continue
@@ -236,7 +257,7 @@ func (s *Server) implementedInterfacesForComponent(build *src.Build, componentTa
 			if entity.Kind != src.InterfaceEntity {
 				continue
 			}
-			if !componentImplementsInterface(componentIO, entity.Interface.IO) {
+			if !componentImplementsInterface(componentIO, entity.Interface) {
 				continue
 			}
 			implementedInterfaces = append(implementedInterfaces, &resolvedEntity{
@@ -253,11 +274,28 @@ func (s *Server) implementedInterfacesForComponent(build *src.Build, componentTa
 }
 
 // componentImplementsInterface performs a structural port-level check for MVP interface implementation.
-func componentImplementsInterface(componentIO src.IO, interfaceIO src.IO) bool {
-	return ioContainsPorts(componentIO.In, interfaceIO.In) && ioContainsPorts(componentIO.Out, interfaceIO.Out)
+func componentImplementsInterface(componentIO src.IO, interfaceDef src.Interface) bool {
+	interfaceTypeParams := interfaceTypeParamNames(interfaceDef.TypeParams)
+	return ioContainsPorts(componentIO.In, interfaceDef.IO.In, interfaceTypeParams) &&
+		ioContainsPorts(componentIO.Out, interfaceDef.IO.Out, interfaceTypeParams)
 }
 
-func ioContainsPorts(componentPorts map[string]src.Port, interfacePorts map[string]src.Port) bool {
+func interfaceTypeParamNames(typeParams src.TypeParams) map[string]struct{} {
+	result := make(map[string]struct{}, len(typeParams.Params))
+	for _, param := range typeParams.Params {
+		if param.Name == "" {
+			continue
+		}
+		result[param.Name] = struct{}{}
+	}
+	return result
+}
+
+func ioContainsPorts(
+	componentPorts map[string]src.Port,
+	interfacePorts map[string]src.Port,
+	interfaceTypeParams map[string]struct{},
+) bool {
 	interfacePortNames := make([]string, 0, len(interfacePorts))
 	for name := range interfacePorts {
 		interfacePortNames = append(interfacePortNames, name)
@@ -272,11 +310,99 @@ func ioContainsPorts(componentPorts map[string]src.Port, interfacePorts map[stri
 		if componentPort.IsArray != interfacePort.IsArray {
 			return false
 		}
-		if componentPort.TypeExpr.String() != interfacePort.TypeExpr.String() {
+		if !typeExprMatchesWithInterfaceTypeParams(componentPort.TypeExpr, interfacePort.TypeExpr, interfaceTypeParams) {
 			return false
 		}
 	}
 	return true
+}
+
+func typeExprMatchesWithInterfaceTypeParams(
+	componentExpr ts.Expr,
+	interfaceExpr ts.Expr,
+	interfaceTypeParams map[string]struct{},
+) bool {
+	if interfaceExpr.Inst != nil &&
+		interfaceExpr.Inst.Ref.Pkg == "" &&
+		len(interfaceExpr.Inst.Args) == 0 {
+		if _, ok := interfaceTypeParams[interfaceExpr.Inst.Ref.Name]; ok {
+			return true
+		}
+	}
+
+	if componentExpr.Inst != nil || interfaceExpr.Inst != nil {
+		if componentExpr.Inst == nil || interfaceExpr.Inst == nil {
+			return false
+		}
+		if !sameTypeRef(componentExpr.Inst.Ref, interfaceExpr.Inst.Ref) {
+			return false
+		}
+		if len(componentExpr.Inst.Args) != len(interfaceExpr.Inst.Args) {
+			return false
+		}
+		for i := range interfaceExpr.Inst.Args {
+			if !typeExprMatchesWithInterfaceTypeParams(
+				componentExpr.Inst.Args[i],
+				interfaceExpr.Inst.Args[i],
+				interfaceTypeParams,
+			) {
+				return false
+			}
+		}
+		return true
+	}
+
+	if componentExpr.Lit == nil || interfaceExpr.Lit == nil {
+		return false
+	}
+	if componentExpr.Lit.Type() != interfaceExpr.Lit.Type() {
+		return false
+	}
+
+	switch interfaceExpr.Lit.Type() {
+	case ts.StructLitType:
+		if len(componentExpr.Lit.Struct) != len(interfaceExpr.Lit.Struct) {
+			return false
+		}
+		for fieldName, interfaceFieldExpr := range interfaceExpr.Lit.Struct {
+			componentFieldExpr, ok := componentExpr.Lit.Struct[fieldName]
+			if !ok {
+				return false
+			}
+			if !typeExprMatchesWithInterfaceTypeParams(componentFieldExpr, interfaceFieldExpr, interfaceTypeParams) {
+				return false
+			}
+		}
+		return true
+	case ts.UnionLitType:
+		if len(componentExpr.Lit.Union) != len(interfaceExpr.Lit.Union) {
+			return false
+		}
+		for tagName, interfaceTagExpr := range interfaceExpr.Lit.Union {
+			componentTagExpr, ok := componentExpr.Lit.Union[tagName]
+			if !ok {
+				return false
+			}
+			if interfaceTagExpr == nil || componentTagExpr == nil {
+				if interfaceTagExpr != nil || componentTagExpr != nil {
+					return false
+				}
+				continue
+			}
+			if !typeExprMatchesWithInterfaceTypeParams(*componentTagExpr, *interfaceTagExpr, interfaceTypeParams) {
+				return false
+			}
+		}
+		return true
+	case ts.EmptyLitType:
+		return true
+	default:
+		return false
+	}
+}
+
+func sameTypeRef(a core.EntityRef, b core.EntityRef) bool {
+	return a.Pkg == b.Pkg && a.Name == b.Name
 }
 
 // buildShowReferencesCommand creates the editor command expected by VS Code's references UI.
@@ -288,7 +414,7 @@ func buildShowReferencesCommand(
 ) *protocol.Command {
 	return &protocol.Command{
 		Title:   title,
-		Command: "editor.action.showReferences",
+		Command: showReferencesClientCommand,
 		Arguments: []any{
 			uri,
 			position,
