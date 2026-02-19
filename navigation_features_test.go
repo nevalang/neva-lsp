@@ -226,6 +226,71 @@ def PrintSecondLine(data int) (res any, err error) {
 	}
 }
 
+func TestHoverIncludesLeadingCommentsAcrossDirectives(t *testing.T) {
+	t.Parallel()
+
+	mainFile := strings.TrimSpace(`
+// sends input through unchanged
+// used to validate hover docs without directives
+def LocalComponent(data any) (res any) {
+	:data -> :res
+}
+
+// docs should still appear in hover
+// even with directives between docs and declaration
+#extern(external_component)
+def ExternalComponent(data any) (res any)
+
+def Main(start any) (stop any) {
+	local LocalComponent
+	external ExternalComponent
+	---
+	:start -> local -> external -> :stop
+}
+`) + "\n"
+
+	server, docURI, content := buildIndexedServerWithSingleMainFile(t, mainFile)
+
+	localPos := positionForNth(t, content, "LocalComponent", 1, 2)
+	localHover, err := server.TextDocumentHover(nil, &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     localPos,
+		},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentHover(LocalComponent) error = %v", err)
+	}
+	localHoverValue := hoverMarkupValue(t, localHover)
+	if !strings.Contains(localHoverValue, "sends input through unchanged\nused to validate hover docs without directives") {
+		t.Fatalf("TextDocumentHover(LocalComponent) value=%q, expected leading comment block", localHoverValue)
+	}
+	if !strings.Contains(localHoverValue, "def LocalComponent") {
+		t.Fatalf("TextDocumentHover(LocalComponent) value=%q, expected component signature", localHoverValue)
+	}
+
+	externalPos := positionForNth(t, content, "ExternalComponent", 1, 2)
+	externalHover, err := server.TextDocumentHover(nil, &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     externalPos,
+		},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentHover(ExternalComponent) error = %v", err)
+	}
+	externalHoverValue := hoverMarkupValue(t, externalHover)
+	if !strings.Contains(
+		externalHoverValue,
+		"docs should still appear in hover\neven with directives between docs and declaration",
+	) {
+		t.Fatalf("TextDocumentHover(ExternalComponent) value=%q, expected directive-separated comment block", externalHoverValue)
+	}
+	if !strings.Contains(externalHoverValue, "def ExternalComponent") {
+		t.Fatalf("TextDocumentHover(ExternalComponent) value=%q, expected component signature", externalHoverValue)
+	}
+}
+
 func TestNodeAndPortNavigationAndHover(t *testing.T) {
 	t.Parallel()
 
