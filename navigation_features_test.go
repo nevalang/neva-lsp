@@ -449,6 +449,7 @@ def IsEven(data int) (res bool) {
 	}
 
 	var filterRefsLens *protocol.CodeLens
+	var predicateImplLens *protocol.CodeLens
 	for i := range lenses {
 		parsed, ok := parseCodeLensData(lenses[i].Data)
 		if !ok {
@@ -456,11 +457,16 @@ def IsEven(data int) (res bool) {
 		}
 		if parsed.Name == "Filter" && parsed.Kind == codeLensKindReferences {
 			filterRefsLens = &lenses[i]
-			break
+		}
+		if parsed.Name == "IPredicate" && parsed.Kind == codeLensKindImplementations {
+			predicateImplLens = &lenses[i]
 		}
 	}
 	if filterRefsLens == nil {
 		t.Fatal("missing references code lens for std streams.Filter")
+	}
+	if predicateImplLens == nil {
+		t.Fatal("missing implementations code lens for std streams.IPredicate")
 	}
 
 	resolvedLens, err := server.CodeLensResolve(nil, filterRefsLens)
@@ -491,6 +497,20 @@ def IsEven(data int) (res bool) {
 	}
 	if len(locations) == 0 {
 		t.Fatal("CodeLensResolve(Filter references) returned empty locations")
+	}
+
+	resolvedImplLens, err := server.CodeLensResolve(nil, predicateImplLens)
+	if err != nil {
+		t.Fatalf("CodeLensResolve(IPredicate implementations) error = %v", err)
+	}
+	if resolvedImplLens.Command == nil {
+		t.Fatal("CodeLensResolve(IPredicate implementations) command is nil")
+	}
+	if !strings.Contains(resolvedImplLens.Command.Title, "implementations") {
+		t.Fatalf(
+			"CodeLensResolve(IPredicate implementations) title=%q, expected implementations count",
+			resolvedImplLens.Command.Title,
+		)
 	}
 }
 

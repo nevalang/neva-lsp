@@ -61,20 +61,24 @@ func (s *Server) TextDocumentCodeLens(
 			missingMetaCount++
 			continue
 		}
-		lenses = append(lenses, protocol.CodeLens{
-			Range: nameRange,
-			Data: codeLensData{
-				URI:  pathToURI(fileCtx.filePath),
-				Name: name,
-				Kind: codeLensKindReferences,
-			},
-		})
+
+		target, resolved := s.resolveEntityRef(build, fileCtx, core.EntityRef{Name: name})
+		if !resolved {
+			continue
+		}
+
+		if len(s.referenceLocationsForEntity(build, target)) > 0 {
+			lenses = append(lenses, protocol.CodeLens{
+				Range: nameRange,
+				Data: codeLensData{
+					URI:  pathToURI(fileCtx.filePath),
+					Name: name,
+					Kind: codeLensKindReferences,
+				},
+			})
+		}
 
 		if entity.Kind == src.InterfaceEntity {
-			target, resolved := s.resolveEntityRef(build, fileCtx, core.EntityRef{Name: name})
-			if !resolved {
-				continue
-			}
 			if len(s.implementationLocationsForEntity(build, target)) == 0 {
 				continue
 			}
@@ -187,13 +191,9 @@ func (s *Server) referenceLocationsForEntity(build *src.Build, target *resolvedE
 	}
 
 	switch target.entity.Kind {
-	case src.ComponentEntity:
-		for _, implementedInterface := range s.implementedInterfacesForComponent(build, target) {
-			appendUnique(s.referencesForEntity(build, implementedInterface))
-		}
 	case src.InterfaceEntity:
 		appendUnique(s.implementationLocationsForEntity(build, target))
-	case src.ConstEntity, src.TypeEntity:
+	case src.ComponentEntity, src.ConstEntity, src.TypeEntity:
 		// No extra relationship references for const/type entities.
 	}
 	return locations
@@ -296,6 +296,15 @@ func ioContainsPorts(
 	interfacePorts map[string]src.Port,
 	interfaceTypeParams map[string]struct{},
 ) bool {
+	if len(interfacePorts) == 1 && len(componentPorts) == 1 {
+		componentPort := firstPort(componentPorts)
+		interfacePort := firstPort(interfacePorts)
+		if componentPort.IsArray != interfacePort.IsArray {
+			return false
+		}
+		return typeExprMatchesWithInterfaceTypeParams(componentPort.TypeExpr, interfacePort.TypeExpr, interfaceTypeParams)
+	}
+
 	interfacePortNames := make([]string, 0, len(interfacePorts))
 	for name := range interfacePorts {
 		interfacePortNames = append(interfacePortNames, name)
@@ -315,6 +324,13 @@ func ioContainsPorts(
 		}
 	}
 	return true
+}
+
+func firstPort(ports map[string]src.Port) src.Port {
+	for _, port := range ports {
+		return port
+	}
+	return src.Port{}
 }
 
 func typeExprMatchesWithInterfaceTypeParams(

@@ -1867,6 +1867,9 @@ func (s *Server) TextDocumentDocumentSymbol(
 				bodyRange = fullRange
 			}
 		}
+		if !rangeIsValid(bodyRange) || !rangeContains(bodyRange, selectionRange) {
+			bodyRange = selectionRange
+		}
 		symbol := protocol.DocumentSymbol{
 			Name:           name,
 			Kind:           entitySymbolKind(entity.Kind),
@@ -1877,6 +1880,22 @@ func (s *Server) TextDocumentDocumentSymbol(
 	}
 
 	return symbols, nil
+}
+
+func rangeContains(outer protocol.Range, inner protocol.Range) bool {
+	if outer.Start.Line > inner.Start.Line {
+		return false
+	}
+	if outer.Start.Line == inner.Start.Line && outer.Start.Character > inner.Start.Character {
+		return false
+	}
+	if outer.End.Line < inner.End.Line {
+		return false
+	}
+	if outer.End.Line == inner.End.Line && outer.End.Character < inner.End.Character {
+		return false
+	}
+	return true
 }
 
 // entitySymbolKind maps Neva entity kinds to LSP document symbol kinds.

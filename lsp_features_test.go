@@ -183,7 +183,7 @@ func TestImplementationLocationsForInterface(t *testing.T) {
 }
 
 // TestTextDocumentCodeLensEmitsExpectedKinds ensures interface declarations get two lenses
-// (references + implementations), while other entities keep references only.
+// (references + implementations), while zero-count lenses are omitted.
 func TestTextDocumentCodeLensEmitsExpectedKinds(t *testing.T) {
 	t.Parallel()
 
@@ -195,11 +195,11 @@ func TestTextDocumentCodeLensEmitsExpectedKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TextDocumentCodeLens() error = %v", err)
 	}
-	if len(lenses) != 4 {
-		t.Fatalf("TextDocumentCodeLens() count=%d, want 4", len(lenses))
+	if len(lenses) != 2 {
+		t.Fatalf("TextDocumentCodeLens() count=%d, want 2", len(lenses))
 	}
 
-	// We expect: Greeter references + implementations, HelloGreeter references, Answer references.
+	// We expect only Greeter references + implementations (other declarations have zero-count lenses).
 	got := map[string]map[codeLensKind]struct{}{}
 	for _, lens := range lenses {
 		parsedCodeLensData, ok := parseCodeLensData(lens.Data)
@@ -213,8 +213,6 @@ func TestTextDocumentCodeLensEmitsExpectedKinds(t *testing.T) {
 	}
 
 	assertLensKinds(t, got, "Greeter", []codeLensKind{codeLensKindReferences, codeLensKindImplementations})
-	assertLensKinds(t, got, "HelloGreeter", []codeLensKind{codeLensKindReferences})
-	assertLensKinds(t, got, "Answer", []codeLensKind{codeLensKindReferences})
 }
 
 // TestCodeLensResolveForInterfaceImplementation verifies resolved implementation lenses
@@ -294,6 +292,28 @@ func TestCodeLensResolveHidesZeroReferenceLens(t *testing.T) {
 	}
 }
 
+func TestComponentReferencesDoNotIncludeImplementedInterfaceReferences(t *testing.T) {
+	t.Parallel()
+
+	server, docURI := buildTestLSPServerWithSingleFile()
+	lens := &protocol.CodeLens{
+		Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}},
+		Data: codeLensData{
+			URI:  docURI,
+			Name: "HelloGreeter",
+			Kind: codeLensKindReferences,
+		},
+	}
+
+	resolvedLens, err := server.CodeLensResolve(nil, lens)
+	if err != nil {
+		t.Fatalf("CodeLensResolve() error = %v", err)
+	}
+	if resolvedLens.Command != nil {
+		t.Fatalf("CodeLensResolve() command=%+v, want nil for component without direct references", resolvedLens.Command)
+	}
+}
+
 func TestTextDocumentCodeLensSkipsEmptyImplementationLens(t *testing.T) {
 	t.Parallel()
 
@@ -341,15 +361,8 @@ func TestTextDocumentCodeLensSkipsEmptyImplementationLens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TextDocumentCodeLens() error = %v", err)
 	}
-	if len(lenses) != 1 {
-		t.Fatalf("TextDocumentCodeLens() count=%d, want 1", len(lenses))
-	}
-	parsed, ok := parseCodeLensData(lenses[0].Data)
-	if !ok {
-		t.Fatalf("invalid code lens data payload: %#v", lenses[0].Data)
-	}
-	if parsed.Name != "Greeter" || parsed.Kind != codeLensKindReferences {
-		t.Fatalf("unexpected lens payload=%+v, want Greeter references only", parsed)
+	if len(lenses) != 0 {
+		t.Fatalf("TextDocumentCodeLens() count=%d, want 0", len(lenses))
 	}
 }
 
@@ -485,6 +498,65 @@ func TestDocumentSymbolRangeUsesEntityBody(t *testing.T) {
 			"DocumentSymbol range end line=%d, selection end line=%d; want body range to extend beyond selection",
 			symbol.Range.End.Line,
 			symbol.SelectionRange.End.Line,
+		)
+	}
+}
+
+func TestDocumentSymbolFallsBackWhenBodyRangeDoesNotContainSelectionRange(t *testing.T) {
+	t.Parallel()
+
+	moduleRef := core.ModuleRef{Path: "@"}
+	componentMeta := core.Meta{
+		Text:  "def BadMeta",
+		Start: core.Position{Line: 1, Column: 0},
+		Stop:  core.Position{Line: 1, Column: 1},
+	}
+
+	build := src.Build{
+		Modules: map[core.ModuleRef]src.Module{
+			moduleRef: {
+				Packages: map[string]src.Package{
+					"main": {
+						"main": {
+							Entities: map[string]src.Entity{
+								"Main": {
+									Kind: src.ComponentEntity,
+									Component: []src.Component{
+										{Meta: componentMeta},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	server := &Server{
+		workspacePath: "/tmp/workspace",
+		indexMutex:    &sync.Mutex{},
+	}
+	server.setBuild(build)
+
+	result, err := server.TextDocumentDocumentSymbol(nil, &protocol.DocumentSymbolParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: pathToURI("/tmp/workspace/main/main.neva")},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentDocumentSymbol() error = %v", err)
+	}
+	symbols, ok := result.([]protocol.DocumentSymbol)
+	if !ok {
+		t.Fatalf("TextDocumentDocumentSymbol() type=%T, want []protocol.DocumentSymbol", result)
+	}
+	if len(symbols) != 1 {
+		t.Fatalf("TextDocumentDocumentSymbol() len=%d, want 1", len(symbols))
+	}
+	if symbols[0].Range != symbols[0].SelectionRange {
+		t.Fatalf(
+			"TextDocumentDocumentSymbol() range=%+v selectionRange=%+v, expected fallback to selectionRange",
+			symbols[0].Range,
+			symbols[0].SelectionRange,
 		)
 	}
 }
