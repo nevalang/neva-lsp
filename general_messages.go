@@ -12,9 +12,10 @@ func (s *Server) Initialize(glspCtx *glsp.Context, params *protocol.InitializePa
 	if capabilities.CodeLensProvider != nil {
 		capabilities.CodeLensProvider.ResolveProvider = ptr(true)
 	}
-	// Temporary rollback: semantic tokens currently degrade default highlighting
-	// in VS Code for Neva documents. Keep TextMate coloring as the source of truth.
-	capabilities.SemanticTokensProvider = nil
+	// Populate the legend so clients can map token type indices from responses.
+	if opts, ok := capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions); ok {
+		opts.Legend = semanticTokensLegend()
+	}
 
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
