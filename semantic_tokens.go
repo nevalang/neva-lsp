@@ -117,6 +117,7 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext) [
 		}
 		return tokens[i].line < tokens[j].line
 	})
+	tokens = dropOverlappingSemanticTokens(tokens)
 
 	return tokens
 }
@@ -206,7 +207,7 @@ func portAddrTokens(addr src.PortAddr, index map[string]int) []semanticToken {
 	text := addr.Meta.Text
 	var tokens []semanticToken
 
-	if addr.Node != "" {
+	if addr.Node != "" && !strings.HasPrefix(addr.Node, ":") {
 		nodeLen := len(addr.Node)
 		tokens = append(tokens, makeToken(addr.Meta, 0, nodeLen, index["variable"]))
 	}
@@ -220,6 +221,40 @@ func portAddrTokens(addr src.PortAddr, index map[string]int) []semanticToken {
 	}
 
 	return tokens
+}
+
+func dropOverlappingSemanticTokens(tokens []semanticToken) []semanticToken {
+	if len(tokens) <= 1 {
+		return tokens
+	}
+
+	filtered := make([]semanticToken, 0, len(tokens))
+	for _, token := range tokens {
+		if token.length <= 0 {
+			continue
+		}
+		if len(filtered) == 0 {
+			filtered = append(filtered, token)
+			continue
+		}
+
+		lastIdx := len(filtered) - 1
+		prev := filtered[lastIdx]
+		prevEnd := prev.start + prev.length
+
+		if token.line != prev.line || token.start >= prevEnd {
+			filtered = append(filtered, token)
+			continue
+		}
+
+		// When two semantic tokens overlap, keep the one with the larger span.
+		// Overlapping tokens are invalid for VS Code and may disable highlighting.
+		if token.length > prev.length {
+			filtered[lastIdx] = token
+		}
+	}
+
+	return filtered
 }
 
 // encodeSemanticTokens converts absolute tokens to LSP delta-encoded payload format.
