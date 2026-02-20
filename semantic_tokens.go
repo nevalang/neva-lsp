@@ -5,7 +5,6 @@ package main
 
 import (
 	"math"
-	"os"
 	"sort"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	src "github.com/nevalang/neva/pkg/ast"
+	"github.com/nevalang/neva/pkg/core"
 )
 
 // semanticTokenTypes returns the token names declared in the semantic token legend.
@@ -66,21 +66,20 @@ func (s *Server) TextDocumentSemanticTokensFull(
 		return nil, err
 	}
 
-	fileLines := readSemanticTokenLines(fileCtx.filePath)
-	tokens := s.collectSemanticTokens(build, fileCtx, fileLines)
+	tokens := s.collectSemanticTokens(build, fileCtx)
 	encodedTokenData := encodeSemanticTokens(tokens)
 	return &protocol.SemanticTokens{Data: encodedTokenData}, nil
 }
 
 // collectSemanticTokens gathers declaration, reference, and port-address tokens from a file.
-func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext, fileLines []string) []semanticToken {
+func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext) []semanticToken {
 	typeIndex := tokenTypeIndex()
 	tokens := make([]semanticToken, 0, len(fileCtx.file.Entities))
 
 	for name, entity := range fileCtx.file.Entities {
 		if tokenType, ok := entityTokenType(entity.Kind, typeIndex); ok {
 			if declarationRange, found := rangeForEntityDeclaration(entity, name, fileCtx.filePath); found {
-				if token, tokenOK := tokenFromNamedRange(declarationRange, tokenType, name, fileLines); tokenOK {
+				if token, tokenOK := tokenFromRange(declarationRange, tokenType); tokenOK {
 					tokens = append(tokens, token)
 				}
 			}
@@ -89,7 +88,7 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext, f
 		if entity.Kind == src.ComponentEntity {
 			for _, comp := range entity.Component {
 				for _, conn := range comp.Net {
-					tokens = append(tokens, collectPortTokens(conn, typeIndex, fileLines)...)
+					tokens = append(tokens, collectPortTokens(conn, typeIndex)...)
 				}
 			}
 		}
@@ -106,7 +105,7 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext, f
 			continue
 		}
 		refRange := entityRefNameRange(ref.meta, ref.ref)
-		if token, tokenOK := tokenFromNamedRange(refRange, tokenType, ref.ref.Name, fileLines); tokenOK {
+		if token, tokenOK := tokenFromRange(refRange, tokenType); tokenOK {
 			tokens = append(tokens, token)
 		}
 	}
@@ -122,17 +121,6 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext, f
 	return tokens
 }
 
-func readSemanticTokenLines(filePath string) []string {
-	if filePath == "" {
-		return nil
-	}
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil
-	}
-	return strings.Split(string(content), "\n")
-}
-
 func tokenFromRange(r protocol.Range, tokenType int) (semanticToken, bool) {
 	if r.Start.Line != r.End.Line || r.End.Character <= r.Start.Character {
 		return semanticToken{}, false
@@ -144,52 +132,6 @@ func tokenFromRange(r protocol.Range, tokenType int) (semanticToken, bool) {
 		tokenType: tokenType,
 		modifiers: 0,
 	}, true
-}
-
-func tokenFromNamedRange(
-	r protocol.Range,
-	tokenType int,
-	expectedName string,
-	fileLines []string,
-) (semanticToken, bool) {
-	token, ok := tokenFromRange(r, tokenType)
-	if !ok {
-		return semanticToken{}, false
-	}
-
-	if expectedName == "" {
-		return token, true
-	}
-	if len(fileLines) == 0 {
-		return token, true
-	}
-	if !rangeMatchesFileText(r, expectedName, fileLines) {
-		return semanticToken{}, false
-	}
-
-	return token, true
-}
-
-func rangeMatchesFileText(r protocol.Range, expected string, lines []string) bool {
-	if r.Start.Line != r.End.Line {
-		return false
-	}
-	lineIdx := int(r.Start.Line)
-	if lineIdx < 0 || lineIdx >= len(lines) {
-		return false
-	}
-	start := int(r.Start.Character)
-	end := int(r.End.Character)
-	if start < 0 || end <= start {
-		return false
-	}
-
-	line := lines[lineIdx]
-	if end > len(line) {
-		return false
-	}
-
-	return line[start:end] == expected
 }
 
 // tokenTypeIndex maps legend token names to numeric indices.
@@ -218,42 +160,62 @@ func entityTokenType(kind src.EntityKind, index map[string]int) (int, bool) {
 	}
 }
 
+// makeToken converts Neva metadata into absolute token coordinates.
+func makeToken(meta core.Meta, offset int, length int, tokenType int) semanticToken {
+	line := meta.Start.Line - 1
+	start := meta.Start.Column + offset
+	if line < 0 {
+		line = 0
+	}
+	if start < 0 {
+		start = 0
+	}
+	return semanticToken{
+		line:      line,
+		start:     start,
+		length:    length,
+		tokenType: tokenType,
+		modifiers: 0,
+	}
+}
+
 // collectPortTokens walks a connection tree and tokenizes node/port address segments.
-func collectPortTokens(conn src.Connection, index map[string]int, fileLines []string) []semanticToken {
+func collectPortTokens(conn src.Connection, index map[string]int) []semanticToken {
 	var tokens []semanticToken
 	for _, sender := range conn.Senders {
 		if sender.PortAddr != nil {
-			tokens = append(tokens, portAddrTokens(*sender.PortAddr, index, fileLines)...)
+			tokens = append(tokens, portAddrTokens(*sender.PortAddr, index)...)
 		}
 	}
 	for _, receiver := range conn.Receivers {
 		if receiver.PortAddr != nil {
-			tokens = append(tokens, portAddrTokens(*receiver.PortAddr, index, fileLines)...)
+			tokens = append(tokens, portAddrTokens(*receiver.PortAddr, index)...)
 		}
 		if receiver.ChainedConnection != nil {
-			tokens = append(tokens, collectPortTokens(*receiver.ChainedConnection, index, fileLines)...)
+			tokens = append(tokens, collectPortTokens(*receiver.ChainedConnection, index)...)
 		}
 	}
 	return tokens
 }
 
 // portAddrTokens emits separate tokens for node names and port names inside an address.
-func portAddrTokens(addr src.PortAddr, index map[string]int, fileLines []string) []semanticToken {
+func portAddrTokens(addr src.PortAddr, index map[string]int) []semanticToken {
+	if addr.Meta.Text == "" {
+		return nil
+	}
+	text := addr.Meta.Text
 	var tokens []semanticToken
 
 	if addr.Node != "" {
-		if nodeRange, ok := rangeForNodeInPortAddr(addr); ok {
-			if token, tokenOK := tokenFromNamedRange(nodeRange, index["variable"], addr.Node, fileLines); tokenOK {
-				tokens = append(tokens, token)
-			}
-		}
+		nodeLen := len(addr.Node)
+		tokens = append(tokens, makeToken(addr.Meta, 0, nodeLen, index["variable"]))
 	}
 
 	if addr.Port != "" {
-		if portRange, ok := rangeForPortInPortAddr(addr); ok {
-			if token, tokenOK := tokenFromNamedRange(portRange, index["property"], addr.Port, fileLines); tokenOK {
-				tokens = append(tokens, token)
-			}
+		idx := strings.Index(text, ":"+addr.Port)
+		if idx >= 0 {
+			portOffset := idx + 1
+			tokens = append(tokens, makeToken(addr.Meta, portOffset, len(addr.Port), index["property"]))
 		}
 	}
 
