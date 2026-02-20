@@ -1641,7 +1641,7 @@ func (s *Server) TextDocumentHover(
 	if node, found := s.findNodeHitAtPosition(ctx, pos); found {
 		resolved, ok := s.resolveEntityRef(build, ctx, node.node.EntityRef)
 		if ok {
-			contents := formatNodeHover(node.nodeName, resolved)
+			contents := s.formatNodeHover(node.nodeName, resolved)
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: contents},
 				Range:    &node.rng,
@@ -1677,7 +1677,7 @@ func (s *Server) TextDocumentHover(
 		resolved, ok := s.resolveEntityRef(build, ctx, refHit.ref)
 		if ok {
 			r := entityRefNameRange(refHit.meta, refHit.ref)
-			contents := formatEntityHover(resolved)
+			contents := s.formatEntityHover(resolved)
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: contents},
 				Range:    &r,
@@ -1692,7 +1692,7 @@ func (s *Server) TextDocumentHover(
 			if !ok {
 				return nil, nil
 			}
-			contents := formatEntityHover(resolved)
+			contents := s.formatEntityHover(resolved)
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: contents},
 				Range:    &r,
@@ -1713,8 +1713,8 @@ func formatPortHover(port *portHit) string {
 	)
 }
 
-func formatNodeHover(nodeName string, target *resolvedEntity) string {
-	return fmt.Sprintf("Node `%s`\n\n%s", nodeName, formatEntityHover(target))
+func (s *Server) formatNodeHover(nodeName string, target *resolvedEntity) string {
+	return fmt.Sprintf("Node `%s`\n\n%s", nodeName, s.formatEntityHover(target))
 }
 
 func (s *Server) formatPackageHover(alias string, modRef core.ModuleRef, imp src.Import, pkg src.Package) string {
@@ -1780,8 +1780,80 @@ func packageEntities(pkg src.Package) []src.EntitiesResult {
 	return entityRefs
 }
 
-// formatEntityHover formats a Neva snippet for hover markdown.
-func formatEntityHover(target *resolvedEntity) string {
+// formatEntityHover formats a Neva snippet for hover markdown and prepends docs.
+func (s *Server) formatEntityHover(target *resolvedEntity) string {
+	snippet := formatEntityHoverSnippet(target)
+	if declarationRange, ok := rangeForEntityDeclaration(target.entity, target.name, target.filePath); ok {
+		if docs := declarationCommentBlock(target.filePath, int(declarationRange.Start.Line)); docs != "" {
+			return docs + "\n\n" + snippet
+		}
+	}
+	return snippet
+}
+
+func declarationCommentBlock(filePath string, declarationLine int) string {
+	if filePath == "" || declarationLine <= 0 {
+		return ""
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(content), "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+
+	upper := declarationLine - 1
+	if upper >= len(lines) {
+		upper = len(lines) - 1
+	}
+	if upper < 0 {
+		return ""
+	}
+
+	// Directives may be attached between docs and declaration.
+	for upper >= 0 {
+		trimmed := strings.TrimSpace(lines[upper])
+		if trimmed == "" {
+			return ""
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			upper--
+			continue
+		}
+		break
+	}
+	if upper < 0 {
+		return ""
+	}
+
+	end := upper
+	for upper >= 0 {
+		trimmed := strings.TrimSpace(lines[upper])
+		if !strings.HasPrefix(trimmed, "//") {
+			break
+		}
+		upper--
+	}
+	start := upper + 1
+	if start > end {
+		return ""
+	}
+
+	docLines := make([]string, 0, end-start+1)
+	for i := start; i <= end; i++ {
+		line := strings.TrimSpace(lines[i])
+		line = strings.TrimPrefix(line, "//")
+		line = strings.TrimLeft(line, " \t")
+		docLines = append(docLines, line)
+	}
+	return strings.Join(docLines, "\n")
+}
+
+// formatEntityHoverSnippet formats only the declaration snippet for hover markdown.
+func formatEntityHoverSnippet(target *resolvedEntity) string {
 	switch target.entity.Kind {
 	case src.ConstEntity:
 		constType := target.entity.Const.TypeExpr.String()
