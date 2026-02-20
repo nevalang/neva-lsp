@@ -68,6 +68,11 @@ func (s *Server) TextDocumentSemanticTokensFull(
 
 	fileLines := readSemanticTokenLines(fileCtx.filePath)
 	tokens := s.collectSemanticTokens(build, fileCtx, fileLines)
+	if len(tokens) == 0 && len(fileCtx.file.Entities) > 0 {
+		// Fallback to metadata-only tokenization to avoid dropping all highlighting
+		// when frontend metadata and source text disagree for a whole document.
+		tokens = s.collectSemanticTokens(build, fileCtx, nil)
+	}
 	encodedTokenData := encodeSemanticTokens(tokens)
 	return &protocol.SemanticTokens{Data: encodedTokenData}, nil
 }
