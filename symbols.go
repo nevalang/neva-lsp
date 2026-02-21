@@ -169,6 +169,49 @@ func normalizePathForLookup(path string) string {
 	return filepath.Clean(resolvedPath)
 }
 
+func (s *Server) fileText(path string) string {
+	if path == "" {
+		return ""
+	}
+	if text, ok := s.openDocumentTextByPath(path); ok {
+		return text
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(content)
+}
+
+func rangesEqual(a protocol.Range, b protocol.Range) bool {
+	return a.Start.Line == b.Start.Line &&
+		a.Start.Character == b.Start.Character &&
+		a.End.Line == b.End.Line &&
+		a.End.Character == b.End.Character
+}
+
+func samePortDeclaration(a *portHit, b *portHit) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.name != b.name || a.direction != b.direction {
+		return false
+	}
+	if normalizePathForLookup(a.defPath) != normalizePathForLookup(b.defPath) {
+		return false
+	}
+	return rangesEqual(a.defRange, b.defRange)
+}
+
+func appendUniqueTextEdit(edits []protocol.TextEdit, candidate protocol.TextEdit) []protocol.TextEdit {
+	for _, edit := range edits {
+		if edit.NewText == candidate.NewText && rangesEqual(edit.Range, candidate.Range) {
+			return edits
+		}
+	}
+	return append(edits, candidate)
+}
+
 func isFileNotFoundInBuild(err error) bool {
 	return errors.Is(err, errFileNotFoundInBuild)
 }
@@ -349,6 +392,22 @@ func isIdentifierByte(char byte) bool {
 		(char >= 'A' && char <= 'Z') ||
 		(char >= '0' && char <= '9') ||
 		char == '_'
+}
+
+func isIdentifierStartByte(char byte) bool {
+	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
+}
+
+func isValidIdentifierName(name string) bool {
+	if name == "" || !isIdentifierStartByte(name[0]) {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		if !isIdentifierByte(name[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func findIdentifierInMetaText(text string, name string, startOffset int) int {
@@ -1016,6 +1075,273 @@ func rangeForPortInPortAddr(addr src.PortAddr) (protocol.Range, bool) {
 	return spanRange(addr.Meta.Start.Line-1, start, end), true
 }
 
+func normalizeIdentifierRangeInText(r protocol.Range, fileText string) (protocol.Range, bool) {
+	if r.Start.Line != r.End.Line || fileText == "" {
+		return protocol.Range{}, false
+	}
+	lineText, ok := lineAtFromText(fileText, int(r.Start.Line))
+	if !ok || lineText == "" {
+		return protocol.Range{}, false
+	}
+
+	start := int(r.Start.Character)
+	end := int(r.End.Character)
+	if start < 0 || start >= len(lineText) {
+		return protocol.Range{}, false
+	}
+	if end < start {
+		end = start
+	}
+	if end > len(lineText) {
+		end = len(lineText)
+	}
+
+	for start > 0 && isIdentifierByte(lineText[start-1]) {
+		start--
+	}
+	for end < len(lineText) && isIdentifierByte(lineText[end]) {
+		end++
+	}
+
+	if end <= start {
+		return protocol.Range{}, false
+	}
+	if !isIdentifierByte(lineText[start]) {
+		return protocol.Range{}, false
+	}
+
+	return spanRange(int(r.Start.Line), start, end), true
+}
+
+func rangeWithLeadingColon(r protocol.Range, fileText string) protocol.Range {
+	if fileText == "" || r.Start.Line != r.End.Line || r.Start.Character == 0 {
+		return r
+	}
+
+	lineText, ok := lineAtFromText(fileText, int(r.Start.Line))
+	if !ok {
+		return r
+	}
+	start := int(r.Start.Character)
+	if start <= 0 || start > len(lineText) {
+		return r
+	}
+	if lineText[start-1] != ':' {
+		return r
+	}
+
+	return spanRange(int(r.Start.Line), start-1, int(r.End.Character))
+}
+
+func identifierTextInRange(r protocol.Range, fileText string) (string, bool) {
+	if r.Start.Line != r.End.Line || fileText == "" {
+		return "", false
+	}
+	lineText, ok := lineAtFromText(fileText, int(r.Start.Line))
+	if !ok {
+		return "", false
+	}
+
+	start := int(r.Start.Character)
+	end := int(r.End.Character)
+	if start < 0 || end <= start || end > len(lineText) {
+		return "", false
+	}
+	identifier := lineText[start:end]
+	if identifier == "" || !isIdentifierStartByte(identifier[0]) {
+		return "", false
+	}
+	for i := 1; i < len(identifier); i++ {
+		if !isIdentifierByte(identifier[i]) {
+			return "", false
+		}
+	}
+	return identifier, true
+}
+
+func identifierRangeAtColumn(line string, column int) (int, int, bool) {
+	if line == "" {
+		return 0, 0, false
+	}
+	if column < 0 {
+		column = 0
+	}
+	if column > len(line) {
+		column = len(line)
+	}
+
+	index := column
+	if index == len(line) {
+		index--
+	}
+	if index < 0 {
+		return 0, 0, false
+	}
+	if !isIdentifierByte(line[index]) {
+		if index == 0 || !isIdentifierByte(line[index-1]) {
+			return 0, 0, false
+		}
+		index--
+	}
+
+	start := index
+	for start > 0 && isIdentifierByte(line[start-1]) {
+		start--
+	}
+	end := index + 1
+	for end < len(line) && isIdentifierByte(line[end]) {
+		end++
+	}
+	if end <= start {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func matchingParenIndex(line string, openIndex int) (int, bool) {
+	if openIndex < 0 || openIndex >= len(line) || line[openIndex] != '(' {
+		return 0, false
+	}
+	depth := 0
+	for i := openIndex; i < len(line); i++ {
+		switch line[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func signaturePortRangesInLine(line string, lineIdx int) []portHit {
+	inOpen := strings.IndexByte(line, '(')
+	inClose, ok := matchingParenIndex(line, inOpen)
+	if !ok {
+		return nil
+	}
+
+	outOpenRel := strings.IndexByte(line[inClose+1:], '(')
+	if outOpenRel < 0 {
+		return nil
+	}
+	outOpen := inClose + 1 + outOpenRel
+	outClose, ok := matchingParenIndex(line, outOpen)
+	if !ok {
+		return nil
+	}
+
+	collectGroupPorts := func(groupStart int, groupEnd int, direction string) []portHit {
+		hits := make([]portHit, 0, 4)
+		entryStart := groupStart
+		angleDepth := 0
+		parenDepth := 0
+		bracketDepth := 0
+		braceDepth := 0
+		for i := groupStart; i <= groupEnd; i++ {
+			isBoundary := i == groupEnd
+			if !isBoundary {
+				switch line[i] {
+				case '<':
+					angleDepth++
+				case '>':
+					if angleDepth > 0 {
+						angleDepth--
+					}
+				case '(':
+					parenDepth++
+				case ')':
+					if parenDepth > 0 {
+						parenDepth--
+					}
+				case '[':
+					bracketDepth++
+				case ']':
+					if bracketDepth > 0 {
+						bracketDepth--
+					}
+				case '{':
+					braceDepth++
+				case '}':
+					if braceDepth > 0 {
+						braceDepth--
+					}
+				}
+			}
+
+			if !isBoundary || angleDepth != 0 || parenDepth != 0 || bracketDepth != 0 || braceDepth != 0 {
+				continue
+			}
+			if line[i] != ',' && i != groupEnd {
+				continue
+			}
+
+			entryEnd := i
+			if entryStart < entryEnd {
+				nameStart := entryStart
+				for nameStart < entryEnd && (line[nameStart] == ' ' || line[nameStart] == '\t') {
+					nameStart++
+				}
+				nameEnd := nameStart
+				for nameEnd < entryEnd && isIdentifierByte(line[nameEnd]) {
+					nameEnd++
+				}
+				if nameEnd > nameStart {
+					rng := spanRange(lineIdx, nameStart, nameEnd)
+					hits = append(hits, portHit{
+						name:       line[nameStart:nameEnd],
+						direction:  direction,
+						defRange:   rng,
+						hoverRange: rng,
+					})
+				}
+			}
+
+			entryStart = i + 1
+		}
+		return hits
+	}
+
+	hits := collectGroupPorts(inOpen+1, inClose, "in")
+	hits = append(hits, collectGroupPorts(outOpen+1, outClose, "out")...)
+	return hits
+}
+
+func signaturePortHitAtPosition(
+	fileText string,
+	componentName string,
+	componentMeta core.Meta,
+	pos core.Position,
+) (*portHit, bool) {
+	if fileText == "" || componentName == "" || componentMeta.Start.Line <= 0 || pos.Line != componentMeta.Start.Line {
+		return nil, false
+	}
+
+	lineIdx := pos.Line - 1
+	lineText, ok := lineAtFromText(fileText, lineIdx)
+	if !ok {
+		return nil, false
+	}
+	if _, ok := declarationNameIndexInLine(lineText, "def", componentName); !ok {
+		return nil, false
+	}
+	start, end, ok := identifierRangeAtColumn(lineText, pos.Column)
+	if !ok {
+		return nil, false
+	}
+
+	for _, candidate := range signaturePortRangesInLine(lineText, lineIdx) {
+		if int(candidate.defRange.Start.Character) == start && int(candidate.defRange.End.Character) == end {
+			candidate.owner = componentName
+			return &candidate, true
+		}
+	}
+	return nil, false
+}
+
 func isComponentBoundaryNode(node string) bool {
 	return node == "in" || node == "out"
 }
@@ -1035,24 +1361,107 @@ func rangeForPortNameWithFallback(
 	port src.Port,
 	name string,
 	filePath string,
+	fileText string,
 	ownerMeta *core.Meta,
+	ownerName string,
 ) (protocol.Range, bool) {
 	if rng, ok := rangeForPortName(port, name); ok {
 		return rng, true
 	}
-	if ownerMeta == nil || ownerMeta.Start.Line <= 0 || filePath == "" || name == "" {
+	if name == "" {
 		return protocol.Range{}, false
 	}
 
-	lineText, err := readLineAt(filePath, ownerMeta.Start.Line-1)
-	if err != nil {
+	if ownerMeta != nil && ownerMeta.Start.Line > 0 {
+		lineText, ok := lineAtFromText(fileText, ownerMeta.Start.Line-1)
+		if !ok && filePath != "" {
+			var err error
+			lineText, err = readLineAt(filePath, ownerMeta.Start.Line-1)
+			ok = err == nil
+		}
+		if ok {
+			if idx := findIdentifierInMetaText(lineText, name, 0); idx >= 0 {
+				return spanRange(ownerMeta.Start.Line-1, idx, idx+len(name)), true
+			}
+		}
+	}
+
+	if ownerName != "" {
+		if rng, ok := rangeForComponentPortNameInDeclaration(filePath, fileText, ownerName, name); ok {
+			return rng, true
+		}
+	}
+
+	return protocol.Range{}, false
+}
+
+func rangeForComponentPortNameInDeclaration(
+	filePath string,
+	fileText string,
+	componentName string,
+	portName string,
+) (protocol.Range, bool) {
+	if componentName == "" || portName == "" {
 		return protocol.Range{}, false
 	}
-	idx := strings.Index(lineText, name)
-	if idx < 0 {
+
+	if fileText == "" && filePath != "" {
+		fileBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			return protocol.Range{}, false
+		}
+		fileText = string(fileBytes)
+	}
+	if fileText == "" {
 		return protocol.Range{}, false
 	}
-	return spanRange(ownerMeta.Start.Line-1, idx, idx+len(name)), true
+
+	lines := strings.Split(fileText, "\n")
+	for lineIdx, rawLine := range lines {
+		line := strings.TrimSuffix(rawLine, "\r")
+		if _, ok := declarationNameIndexInLine(line, "def", componentName); !ok {
+			continue
+		}
+
+		openParen := strings.IndexByte(line, '(')
+		closeParen := strings.LastIndexByte(line, ')')
+		if openParen < 0 || closeParen <= openParen {
+			continue
+		}
+
+		searchFrom := openParen + 1
+		for searchFrom <= closeParen {
+			segment := line[searchFrom:closeParen]
+			idxInSuffix := findIdentifierInMetaText(segment, portName, 0)
+			if idxInSuffix >= 0 {
+				idx := searchFrom + idxInSuffix
+				return spanRange(lineIdx, idx, idx+len(portName)), true
+			}
+
+			prefixIdx := strings.Index(segment, portName)
+			if prefixIdx < 0 {
+				break
+			}
+
+			idx := searchFrom + prefixIdx
+			leftBoundary := idx == 0 || !isIdentifierByte(line[idx-1])
+			if !leftBoundary {
+				searchFrom = idx + 1
+				continue
+			}
+
+			end := idx + len(portName)
+			for end < closeParen && isIdentifierByte(line[end]) {
+				end++
+			}
+			if end > idx {
+				return spanRange(lineIdx, idx, end), true
+			}
+			searchFrom = idx + 1
+		}
+	}
+
+	return protocol.Range{}, false
 }
 
 func interfaceForEntity(entity src.Entity) (src.Interface, bool) {
@@ -1143,9 +1552,26 @@ func (s *Server) resolvePortForAddr(
 		if !ok {
 			return nil, false
 		}
-		defRange, ok := rangeForPortNameWithFallback(port, addr.Port, ctx.filePath, &component.Meta)
+		componentEntity, exists := ctx.file.Entities[componentName]
+		entityMeta := componentEntity.Meta()
+		fileText := s.fileText(ctx.filePath)
+		if expandedRange, expanded := normalizeIdentifierRangeInText(hoverRange, fileText); expanded {
+			hoverRange = expandedRange
+		}
+
+		currentPortName := addr.Port
+		if resolvedPortName, ok := identifierTextInRange(hoverRange, fileText); ok {
+			currentPortName = resolvedPortName
+		}
+		defRange, ok := rangeForPortNameWithFallback(
+			port,
+			currentPortName,
+			ctx.filePath,
+			fileText,
+			entityMeta,
+			componentName,
+		)
 		if !ok {
-			componentEntity, exists := ctx.file.Entities[componentName]
 			if !exists {
 				return nil, false
 			}
@@ -1154,7 +1580,7 @@ func (s *Server) resolvePortForAddr(
 			}
 		}
 		return &portHit{
-			name:       addr.Port,
+			name:       currentPortName,
 			owner:      componentName,
 			direction:  direction,
 			typeExpr:   port.TypeExpr.String(),
@@ -1201,7 +1627,22 @@ func (s *Server) resolvePortForAddr(
 	}
 
 	entityMeta := resolved.entity.Meta()
-	defRange, ok := rangeForPortNameWithFallback(port, addr.Port, resolved.filePath, entityMeta)
+	fileText := s.fileText(resolved.filePath)
+	if expandedRange, expanded := normalizeIdentifierRangeInText(hoverRange, fileText); expanded {
+		hoverRange = expandedRange
+	}
+	currentPortName := addr.Port
+	if resolvedPortName, ok := identifierTextInRange(hoverRange, fileText); ok {
+		currentPortName = resolvedPortName
+	}
+	defRange, ok := rangeForPortNameWithFallback(
+		port,
+		currentPortName,
+		resolved.filePath,
+		fileText,
+		entityMeta,
+		resolved.name,
+	)
 	if !ok {
 		if defRange, ok = rangeForEntityDeclaration(resolved.entity, resolved.name, resolved.filePath); !ok {
 			return nil, false
@@ -1209,7 +1650,7 @@ func (s *Server) resolvePortForAddr(
 	}
 
 	return &portHit{
-		name:       addr.Port,
+		name:       currentPortName,
 		owner:      addr.Node,
 		direction:  direction,
 		typeExpr:   port.TypeExpr.String(),
@@ -1221,9 +1662,28 @@ func (s *Server) resolvePortForAddr(
 
 func (s *Server) findPortHitAtPosition(build *src.Build, ctx *fileContext, pos core.Position) (*portHit, bool) {
 	var result *portHit
+	fileText := s.fileText(ctx.filePath)
 	forEachComponent(ctx.file, func(componentName string, component src.Component) bool {
+		componentEntity, hasEntity := ctx.file.Entities[componentName]
+		entityMeta := componentEntity.Meta()
+		if signatureHit, ok := signaturePortHitAtPosition(fileText, componentName, component.Meta, pos); ok {
+			signatureHit.defPath = ctx.filePath
+			if signatureHit.direction == "in" {
+				if port, exists := component.Interface.IO.In[signatureHit.name]; exists {
+					signatureHit.typeExpr = port.TypeExpr.String()
+				}
+			}
+			if signatureHit.direction == "out" {
+				if port, exists := component.Interface.IO.Out[signatureHit.name]; exists {
+					signatureHit.typeExpr = port.TypeExpr.String()
+				}
+			}
+			result = signatureHit
+			return false
+		}
+
 		for portName, port := range component.Interface.IO.In {
-			defRange, ok := rangeForPortNameWithFallback(port, portName, ctx.filePath, &component.Meta)
+			defRange, ok := rangeForPortNameWithFallback(port, portName, ctx.filePath, fileText, entityMeta, componentName)
 			if ok && positionInRange(pos, defRange) {
 				result = &portHit{
 					name:       portName,
@@ -1239,7 +1699,7 @@ func (s *Server) findPortHitAtPosition(build *src.Build, ctx *fileContext, pos c
 		}
 
 		for portName, port := range component.Interface.IO.Out {
-			defRange, ok := rangeForPortNameWithFallback(port, portName, ctx.filePath, &component.Meta)
+			defRange, ok := rangeForPortNameWithFallback(port, portName, ctx.filePath, fileText, entityMeta, componentName)
 			if ok && positionInRange(pos, defRange) {
 				result = &portHit{
 					name:       portName,
@@ -1254,13 +1714,23 @@ func (s *Server) findPortHitAtPosition(build *src.Build, ctx *fileContext, pos c
 			}
 		}
 
+		if !hasEntity {
+			return true
+		}
+
 		for _, conn := range component.Net {
 			if !forEachConnectionPortAddr(conn, func(addr src.PortAddr, isSender bool) bool {
 				portRange, ok := rangeForPortInPortAddr(addr)
-				if !ok || !positionInRange(pos, portRange) {
+				if !ok {
 					return true
 				}
-
+				if expandedRange, expanded := normalizeIdentifierRangeInText(portRange, fileText); expanded {
+					portRange = expandedRange
+				}
+				cursorRange := rangeWithLeadingColon(portRange, fileText)
+				if !positionInRange(pos, portRange) && !positionInRange(pos, cursorRange) {
+					return true
+				}
 				hit, ok := s.resolvePortForAddr(build, ctx, componentName, component, addr, isSender, portRange)
 				if !ok {
 					return true
@@ -1463,6 +1933,57 @@ func (s *Server) TextDocumentReferences(
 	return locations, nil
 }
 
+// renamePort rewrites declaration and network usages for the resolved port target.
+func (s *Server) renamePort(build *src.Build, target *portHit, newName string) *protocol.WorkspaceEdit {
+	if target == nil || target.name == "" || target.defPath == "" {
+		return nil
+	}
+
+	edits := map[string][]protocol.TextEdit{}
+	appendEdit := func(uri string, edit protocol.TextEdit) {
+		edits[uri] = appendUniqueTextEdit(edits[uri], edit)
+	}
+
+	s.forEachWorkspaceFile(build, func(fileCtx fileContext) bool {
+		fileText := s.fileText(fileCtx.filePath)
+		forEachComponent(fileCtx.file, func(componentName string, component src.Component) bool {
+			for _, conn := range component.Net {
+				forEachConnectionPortAddr(conn, func(addr src.PortAddr, isSender bool) bool {
+					portRange, ok := rangeForPortInPortAddr(addr)
+					if !ok {
+						return true
+					}
+					if expandedRange, expanded := normalizeIdentifierRangeInText(portRange, fileText); expanded {
+						portRange = expandedRange
+					}
+					hit, ok := s.resolvePortForAddr(build, &fileCtx, componentName, component, addr, isSender, portRange)
+					if !ok || !samePortDeclaration(hit, target) {
+						return true
+					}
+
+					appendEdit(pathToURI(fileCtx.filePath), protocol.TextEdit{
+						Range:   portRange,
+						NewText: newName,
+					})
+					return true
+				})
+			}
+			return true
+		})
+		return true
+	})
+
+	appendEdit(pathToURI(target.defPath), protocol.TextEdit{
+		Range:   target.defRange,
+		NewText: newName,
+	})
+
+	if len(edits) == 0 {
+		return nil
+	}
+	return &protocol.WorkspaceEdit{Changes: edits}
+}
+
 // TextDocumentPrepareRename validates rename targets and returns editable ranges.
 func (s *Server) TextDocumentPrepareRename(
 	glspCtx *glsp.Context,
@@ -1489,6 +2010,10 @@ func (s *Server) TextDocumentPrepareRename(
 		return r, nil
 	}
 
+	if port, found := s.findPortHitAtPosition(build, ctx, pos); found {
+		return port.hoverRange, nil
+	}
+
 	if name, entity, found := s.findEntityDefinitionAtPosition(ctx, pos); found {
 		if r, ok := rangeForEntityDeclaration(*entity, name, ctx.filePath); ok {
 			return r, nil
@@ -1505,6 +2030,10 @@ func (s *Server) TextDocumentRename(
 	glspCtx *glsp.Context,
 	params *protocol.RenameParams,
 ) (*protocol.WorkspaceEdit, error) {
+	if !isValidIdentifierName(params.NewName) {
+		return nil, fmt.Errorf("invalid identifier name: %q", params.NewName)
+	}
+
 	build, ok := s.getBuild()
 	if !ok {
 		return nil, nil
@@ -1515,6 +2044,10 @@ func (s *Server) TextDocumentRename(
 	}
 
 	pos := lspToCorePosition(params.Position)
+	if port, found := s.findPortHitAtPosition(build, ctx, pos); found {
+		return s.renamePort(build, port, params.NewName), nil
+	}
+
 	var target *resolvedEntity
 
 	if refHit, found := s.findEntityRefAtPosition(ctx, pos); found && refHit.segment == entityRefSegmentName {

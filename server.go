@@ -33,6 +33,9 @@ type Server struct {
 
 	activeFile      string
 	activeFileMutex *sync.Mutex
+
+	openDocsMutex *sync.Mutex
+	openDocs      map[string]string
 }
 
 // getBuild returns the latest indexed build snapshot when available.

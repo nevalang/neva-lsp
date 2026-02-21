@@ -58,6 +58,8 @@ func BuildHandler(logger commonlog.Logger, serverName string, indexer indexer.In
 		problemFiles:    make(map[string]struct{}),
 		activeFile:      "",
 		activeFileMutex: &sync.Mutex{},
+		openDocsMutex:   &sync.Mutex{},
+		openDocs:        make(map[string]string),
 	}
 
 	// Basic
@@ -129,9 +131,7 @@ func BuildHandler(logger commonlog.Logger, serverName string, indexer indexer.In
 		return []protocol.TextEdit{}, nil
 	}
 	h.TextDocumentDidSave = s.TextDocumentDidSave
-	h.TextDocumentDidClose = func(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
-		return nil
-	}
+	h.TextDocumentDidClose = s.TextDocumentDidClose
 
 	// Register supported text-document language features.
 	h.TextDocumentCompletion = s.TextDocumentCompletion

@@ -173,30 +173,9 @@ func isKnownCodeLensKind(kind codeLensKind) bool {
 	return kind == codeLensKindReferences || kind == codeLensKindImplementations
 }
 
-// referenceLocationsForEntity includes explicit references and interface/component relation references.
+// referenceLocationsForEntity includes only explicit textual references.
 func (s *Server) referenceLocationsForEntity(build *src.Build, target *resolvedEntity) []protocol.Location {
-	locations := s.referencesForEntity(build, target)
-	seen := make(map[protocol.Location]struct{}, len(locations))
-	for _, location := range locations {
-		seen[location] = struct{}{}
-	}
-	appendUnique := func(extra []protocol.Location) {
-		for _, location := range extra {
-			if _, ok := seen[location]; ok {
-				continue
-			}
-			seen[location] = struct{}{}
-			locations = append(locations, location)
-		}
-	}
-
-	switch target.entity.Kind {
-	case src.InterfaceEntity:
-		appendUnique(s.implementationLocationsForEntity(build, target))
-	case src.ComponentEntity, src.ConstEntity, src.TypeEntity:
-		// No extra relationship references for const/type entities.
-	}
-	return locations
+	return s.referencesForEntity(build, target)
 }
 
 // implementationLocationsForEntity returns implementation-related locations for interfaces.

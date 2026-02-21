@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	neva "github.com/nevalang/neva/pkg"
+	src "github.com/nevalang/neva/pkg/ast"
 	"github.com/nevalang/neva/pkg/indexer"
 	"github.com/tliron/commonlog"
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -455,6 +456,404 @@ pub type Box<T> struct {
 	}
 }
 
+func TestRangeForPortNameWithFallbackUsesComponentDeclarationLookup(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	filePath := filepath.Join(workspace, "main.neva")
+	content := strings.TrimSpace(`
+// docs line
+def Main(start any) (stop123 any) {
+	:start -> :stop123
+}
+`) + "\n"
+	writeNavigationTestFile(t, filePath, content)
+
+	rng, ok := rangeForPortNameWithFallback(
+		src.Port{},
+		"stop123",
+		filePath,
+		content,
+		&core.Meta{Start: core.Position{Line: 1, Column: 0}},
+		"Main",
+	)
+	if !ok {
+		t.Fatal("rangeForPortNameWithFallback() = false, want true")
+	}
+
+	line, err := readLineAt(filePath, int(rng.Start.Line))
+	if err != nil {
+		t.Fatalf("readLineAt() error = %v", err)
+	}
+	got := line[rng.Start.Character:rng.End.Character]
+	if got != "stop123" {
+		t.Fatalf("rangeForPortNameWithFallback() text=%q, want %q", got, "stop123")
+	}
+}
+
+func TestComponentBoundaryPortRenameFromReferenceAndDeclaration(t *testing.T) {
+	t.Parallel()
+
+	mainFile := strings.TrimSpace(`
+def Main(start any) (stop any) {
+	echo Echo
+	---
+	:start -> echo
+	echo -> :stop
+}
+
+def Echo(data any) (res any) {
+	:data -> :res
+}
+`) + "\n"
+
+	server, docURI, content := buildIndexedServerWithSingleMainFile(t, mainFile)
+
+	stopDeclPos := positionForNth(t, content, "stop any", 0, 0)
+	stopRefPos := positionForNth(t, content, ":stop", 0, 1)
+	stopDeclRange := rangeFromPositionAndLength(stopDeclPos, len("stop"))
+	stopRefRange := rangeFromPositionAndLength(stopRefPos, len("stop"))
+
+	testCases := []struct {
+		name      string
+		position  protocol.Position
+		wantRange protocol.Range
+	}{
+		{
+			name:      "from_network_reference",
+			position:  stopRefPos,
+			wantRange: stopRefRange,
+		},
+		{
+			name:      "from_declaration",
+			position:  stopDeclPos,
+			wantRange: stopDeclRange,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prepareResult, err := server.TextDocumentPrepareRename(nil, &protocol.PrepareRenameParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     testCase.position,
+				},
+			})
+			if err != nil {
+				t.Fatalf("TextDocumentPrepareRename(%s) error = %v", testCase.name, err)
+			}
+			prepareRange := prepareRenameRange(t, prepareResult)
+			if !rangesEqual(prepareRange, testCase.wantRange) {
+				t.Fatalf("TextDocumentPrepareRename(%s) range=%+v, want %+v", testCase.name, prepareRange, testCase.wantRange)
+			}
+
+			edit, err := server.TextDocumentRename(nil, &protocol.RenameParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     testCase.position,
+				},
+				NewName: "done",
+			})
+			if err != nil {
+				t.Fatalf("TextDocumentRename(%s) error = %v", testCase.name, err)
+			}
+			if edit == nil {
+				t.Fatalf("TextDocumentRename(%s) returned nil edit", testCase.name)
+			}
+
+			fileEdits, ok := edit.Changes[docURI]
+			if !ok {
+				t.Fatalf("TextDocumentRename(%s) missing edits for %q", testCase.name, docURI)
+			}
+			if len(fileEdits) != 2 {
+				t.Fatalf("TextDocumentRename(%s) edit count=%d, want 2", testCase.name, len(fileEdits))
+			}
+			if !hasTextEdit(fileEdits, stopDeclRange, "done") {
+				t.Fatalf("TextDocumentRename(%s) missing declaration edit for stop port", testCase.name)
+			}
+			if !hasTextEdit(fileEdits, stopRefRange, "done") {
+				t.Fatalf("TextDocumentRename(%s) missing network reference edit for stop port", testCase.name)
+			}
+		})
+	}
+}
+
+func TestComponentBoundaryPortRenameAfterUnsavedDidChange(t *testing.T) {
+	t.Parallel()
+
+	mainFile := strings.TrimSpace(`
+def Main(start any) (stop any) {
+	echo Echo
+	---
+	:start -> echo
+	echo -> :stop
+}
+
+def Echo(data any) (res any) {
+	:data -> :res
+}
+`) + "\n"
+
+	server, docURI, _ := buildIndexedServerWithSingleMainFile(t, mainFile)
+	changedFile := strings.ReplaceAll(mainFile, "stop", "stop123")
+
+	if err := server.TextDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:  docURI,
+			Text: mainFile,
+		},
+	}); err != nil {
+		t.Fatalf("TextDocumentDidOpen() error = %v", err)
+	}
+	if err := server.TextDocumentDidChange(nil, &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
+			Version:                2,
+		},
+		ContentChanges: []any{
+			protocol.TextDocumentContentChangeEventWhole{Text: changedFile},
+		},
+	}); err != nil {
+		t.Fatalf("TextDocumentDidChange() error = %v", err)
+	}
+
+	stopDeclPos := positionForNth(t, changedFile, "stop123 any", 0, len("stop"))
+	stopRefPos := positionForNth(t, changedFile, ":stop123", 0, len(":stop"))
+	stopDeclRange := rangeFromPositionAndLength(
+		positionForNth(t, changedFile, "stop123 any", 0, 0),
+		len("stop123"),
+	)
+	stopRefRange := rangeFromPositionAndLength(
+		positionForNth(t, changedFile, ":stop123", 0, 1),
+		len("stop123"),
+	)
+
+	testCases := []struct {
+		name      string
+		position  protocol.Position
+		wantRange protocol.Range
+	}{
+		{name: "from_changed_declaration_suffix", position: stopDeclPos, wantRange: stopDeclRange},
+		{name: "from_changed_network_suffix", position: stopRefPos, wantRange: stopRefRange},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prepareResult, err := server.TextDocumentPrepareRename(nil, &protocol.PrepareRenameParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     testCase.position,
+				},
+			})
+			if err != nil {
+				t.Fatalf("TextDocumentPrepareRename(%s) error = %v", testCase.name, err)
+			}
+			prepareRange := prepareRenameRange(t, prepareResult)
+			if !rangesEqual(prepareRange, testCase.wantRange) {
+				t.Fatalf("TextDocumentPrepareRename(%s) range=%+v, want %+v", testCase.name, prepareRange, testCase.wantRange)
+			}
+
+			edit, err := server.TextDocumentRename(nil, &protocol.RenameParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     testCase.position,
+				},
+				NewName: "asd",
+			})
+			if err != nil {
+				t.Fatalf("TextDocumentRename(%s) error = %v", testCase.name, err)
+			}
+			if edit == nil {
+				t.Fatalf("TextDocumentRename(%s) returned nil edit", testCase.name)
+			}
+			fileEdits := edit.Changes[docURI]
+			if !hasTextEdit(fileEdits, stopDeclRange, "asd") {
+				t.Fatalf("TextDocumentRename(%s) missing declaration edit", testCase.name)
+			}
+			if !hasTextEdit(fileEdits, stopRefRange, "asd") {
+				t.Fatalf("TextDocumentRename(%s) missing network edit", testCase.name)
+			}
+		})
+	}
+}
+
+func TestComponentBoundaryPortRenameAfterUnsavedDidChangeNonPrefix(t *testing.T) {
+	t.Parallel()
+
+	mainFile := strings.TrimSpace(`
+def Main(start any) (stop any) {
+	echo Echo
+	---
+	:start -> echo
+	echo -> :stop
+}
+
+def Echo(data any) (res any) {
+	:data -> :res
+}
+`) + "\n"
+
+	server, docURI, _ := buildIndexedServerWithSingleMainFile(t, mainFile)
+	changedFile := strings.ReplaceAll(mainFile, "stop", "asd")
+
+	if err := server.TextDocumentDidOpen(nil, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:  docURI,
+			Text: mainFile,
+		},
+	}); err != nil {
+		t.Fatalf("TextDocumentDidOpen() error = %v", err)
+	}
+	if err := server.TextDocumentDidChange(nil, &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
+			Version:                2,
+		},
+		ContentChanges: []any{
+			protocol.TextDocumentContentChangeEventWhole{Text: changedFile},
+		},
+	}); err != nil {
+		t.Fatalf("TextDocumentDidChange() error = %v", err)
+	}
+
+	asdDeclPos := positionForNth(t, changedFile, "asd any", 0, 1)
+	asdRefPos := positionForNth(t, changedFile, ":asd", 0, 2)
+	asdDeclRange := rangeFromPositionAndLength(positionForNth(t, changedFile, "asd any", 0, 0), len("asd"))
+	asdRefRange := rangeFromPositionAndLength(positionForNth(t, changedFile, ":asd", 0, 1), len("asd"))
+
+	testCases := []struct {
+		name      string
+		position  protocol.Position
+		wantRange protocol.Range
+	}{
+		{name: "declaration", position: asdDeclPos, wantRange: asdDeclRange},
+		{name: "network", position: asdRefPos, wantRange: asdRefRange},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			prepareResult, err := server.TextDocumentPrepareRename(nil, &protocol.PrepareRenameParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     testCase.position,
+				},
+			})
+			if err != nil {
+				t.Fatalf("TextDocumentPrepareRename(%s) error = %v", testCase.name, err)
+			}
+			prepareRange := prepareRenameRange(t, prepareResult)
+			if !rangesEqual(prepareRange, testCase.wantRange) {
+				t.Fatalf("TextDocumentPrepareRename(%s) range=%+v, want %+v", testCase.name, prepareRange, testCase.wantRange)
+			}
+
+			edit, err := server.TextDocumentRename(nil, &protocol.RenameParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     testCase.position,
+				},
+				NewName: "tail",
+			})
+			if err != nil {
+				t.Fatalf("TextDocumentRename(%s) error = %v", testCase.name, err)
+			}
+			if edit == nil {
+				t.Fatalf("TextDocumentRename(%s) returned nil edit", testCase.name)
+			}
+			fileEdits := edit.Changes[docURI]
+			if !hasTextEdit(fileEdits, asdDeclRange, "tail") {
+				t.Fatalf("TextDocumentRename(%s) missing declaration edit", testCase.name)
+			}
+			if !hasTextEdit(fileEdits, asdRefRange, "tail") {
+				t.Fatalf("TextDocumentRename(%s) missing network edit", testCase.name)
+			}
+		})
+	}
+}
+
+func TestPortRenameRejectsInvalidIdentifier(t *testing.T) {
+	t.Parallel()
+
+	mainFile := strings.TrimSpace(`
+def Main(start any) (stop any) {
+	:start -> :stop
+}
+`) + "\n"
+
+	server, docURI, content := buildIndexedServerWithSingleMainFile(t, mainFile)
+	stopDeclPos := positionForNth(t, content, "stop any", 0, 0)
+
+	edit, err := server.TextDocumentRename(nil, &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     stopDeclPos,
+		},
+		NewName: "123",
+	})
+	if err == nil {
+		t.Fatal("TextDocumentRename() error=nil, want invalid identifier error")
+	}
+	if edit != nil {
+		t.Fatalf("TextDocumentRename() edit=%+v, want nil on invalid identifier", edit)
+	}
+}
+
+func TestComponentBoundaryPortRenameFromNetworkColonPosition(t *testing.T) {
+	t.Parallel()
+
+	mainFile := strings.TrimSpace(`
+def Main(start any) (stop any) {
+	echo Echo
+	---
+	:start -> echo
+	echo -> :stop
+}
+
+def Echo(data any) (res any) {
+	:data -> :res
+}
+`) + "\n"
+
+	server, docURI, content := buildIndexedServerWithSingleMainFile(t, mainFile)
+	stopColonPos := positionForNth(t, content, ":stop", 0, 0)
+	stopDeclRange := rangeFromPositionAndLength(positionForNth(t, content, "stop any", 0, 0), len("stop"))
+	stopRefRange := rangeFromPositionAndLength(positionForNth(t, content, ":stop", 0, 1), len("stop"))
+
+	prepareResult, err := server.TextDocumentPrepareRename(nil, &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     stopColonPos,
+		},
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentPrepareRename(colon) error = %v", err)
+	}
+	prepareRange := prepareRenameRange(t, prepareResult)
+	if !rangesEqual(prepareRange, stopRefRange) {
+		t.Fatalf("TextDocumentPrepareRename(colon) range=%+v, want %+v", prepareRange, stopRefRange)
+	}
+
+	edit, err := server.TextDocumentRename(nil, &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     stopColonPos,
+		},
+		NewName: "stop2",
+	})
+	if err != nil {
+		t.Fatalf("TextDocumentRename(colon) error = %v", err)
+	}
+	if edit == nil {
+		t.Fatal("TextDocumentRename(colon) returned nil edit")
+	}
+	fileEdits := edit.Changes[docURI]
+	if !hasTextEdit(fileEdits, stopDeclRange, "stop2") {
+		t.Fatal("TextDocumentRename(colon) missing declaration edit")
+	}
+	if !hasTextEdit(fileEdits, stopRefRange, "stop2") {
+		t.Fatal("TextDocumentRename(colon) missing network edit")
+	}
+}
+
 func TestStdFilterReferencesCodeLensResolvesToShowReferencesCommand(t *testing.T) {
 	t.Parallel()
 
@@ -599,6 +998,8 @@ func buildIndexedServerWithSingleMainFile(t *testing.T, mainFile string) (*Serve
 		problemsMutex:   &sync.Mutex{},
 		problemFiles:    make(map[string]struct{}),
 		activeFileMutex: &sync.Mutex{},
+		openDocsMutex:   &sync.Mutex{},
+		openDocs:        make(map[string]string),
 	}
 
 	build, found, compilerErr := idx.FullScan(context.Background(), workspace)
@@ -679,6 +1080,35 @@ func nthIndex(text, needle string, occurrence int) int {
 		searchStart = index + len(needle)
 	}
 	return index
+}
+
+func prepareRenameRange(t *testing.T, result any) protocol.Range {
+	t.Helper()
+
+	renameRange, ok := result.(protocol.Range)
+	if !ok {
+		t.Fatalf("unexpected prepare rename result type: %T", result)
+	}
+	return renameRange
+}
+
+func rangeFromPositionAndLength(start protocol.Position, length int) protocol.Range {
+	return protocol.Range{
+		Start: start,
+		End: protocol.Position{
+			Line:      start.Line,
+			Character: start.Character + uint32(length),
+		},
+	}
+}
+
+func hasTextEdit(edits []protocol.TextEdit, wantRange protocol.Range, wantText string) bool {
+	for _, edit := range edits {
+		if edit.NewText == wantText && rangesEqual(edit.Range, wantRange) {
+			return true
+		}
+	}
+	return false
 }
 
 func definitionLocationsFromResult(t *testing.T, result any) []protocol.Location {

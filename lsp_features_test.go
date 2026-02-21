@@ -243,8 +243,7 @@ func TestCodeLensResolveForInterfaceImplementation(t *testing.T) {
 	}
 }
 
-// TestCodeLensResolveForInterfaceReferences verifies interface references include explicit refs
-// plus component implementations in the MVP relationship model.
+// TestCodeLensResolveForInterfaceReferences verifies interface references include only explicit refs.
 func TestCodeLensResolveForInterfaceReferences(t *testing.T) {
 	t.Parallel()
 
@@ -265,9 +264,8 @@ func TestCodeLensResolveForInterfaceReferences(t *testing.T) {
 	if resolvedLens.Command == nil {
 		t.Fatalf("CodeLensResolve() command is nil")
 	}
-	// One explicit const reference + one implementing component.
-	if resolvedLens.Command.Title != "2 references" {
-		t.Fatalf("CodeLensResolve() title=%q, want %q", resolvedLens.Command.Title, "2 references")
+	if resolvedLens.Command.Title != "1 references" {
+		t.Fatalf("CodeLensResolve() title=%q, want %q", resolvedLens.Command.Title, "1 references")
 	}
 }
 

@@ -5,7 +5,6 @@ package main
 
 import (
 	"math"
-	"os"
 	"sort"
 	"strings"
 
@@ -66,7 +65,8 @@ func (s *Server) TextDocumentSemanticTokensFull(
 		return nil, err
 	}
 
-	fileLines := readSemanticTokenLines(fileCtx.filePath)
+	fileText := s.fileText(fileCtx.filePath)
+	fileLines := readSemanticTokenLines(fileText)
 	tokens := s.collectSemanticTokens(build, fileCtx, fileLines)
 	if len(tokens) == 0 && len(fileCtx.file.Entities) > 0 {
 		// Fallback to metadata-only tokenization to avoid dropping all highlighting
@@ -81,6 +81,7 @@ func (s *Server) TextDocumentSemanticTokensFull(
 func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext, fileLines []string) []semanticToken {
 	typeIndex := tokenTypeIndex()
 	tokens := make([]semanticToken, 0, len(fileCtx.file.Entities))
+	fileText := s.fileText(fileCtx.filePath)
 
 	for name, entity := range fileCtx.file.Entities {
 		if tokenType, ok := entityTokenType(entity.Kind, typeIndex); ok {
@@ -92,9 +93,23 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext, f
 		}
 
 		if entity.Kind == src.ComponentEntity {
+			entityMeta := entity.Meta()
 			for _, comp := range entity.Component {
+				if entityMeta != nil && entityMeta.Start.Line > 0 {
+					lineIdx := entityMeta.Start.Line - 1
+					if lineText, ok := lineAtFromText(fileText, lineIdx); ok {
+						if _, ok := declarationNameIndexInLine(lineText, "def", name); ok {
+							for _, signaturePort := range signaturePortRangesInLine(lineText, lineIdx) {
+								if token, tokenOK := tokenFromRange(signaturePort.defRange, typeIndex["property"]); tokenOK {
+									tokens = append(tokens, token)
+								}
+							}
+						}
+					}
+				}
+
 				for _, conn := range comp.Net {
-					tokens = append(tokens, collectPortTokens(conn, typeIndex, fileLines)...)
+					tokens = append(tokens, collectPortTokens(conn, typeIndex, fileLines, fileText)...)
 				}
 			}
 		}
@@ -128,15 +143,11 @@ func (s *Server) collectSemanticTokens(build *src.Build, fileCtx *fileContext, f
 	return tokens
 }
 
-func readSemanticTokenLines(filePath string) []string {
-	if filePath == "" {
+func readSemanticTokenLines(fileText string) []string {
+	if fileText == "" {
 		return nil
 	}
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil
-	}
-	return strings.Split(string(content), "\n")
+	return strings.Split(fileText, "\n")
 }
 
 func tokenFromRange(r protocol.Range, tokenType int) (semanticToken, bool) {
@@ -169,11 +180,20 @@ func tokenFromNamedRange(
 	if len(fileLines) == 0 {
 		return token, true
 	}
-	if !rangeMatchesFileText(r, expectedName, fileLines) {
+	if rangeMatchesFileText(r, expectedName, fileLines) {
+		return token, true
+	}
+
+	adjustedRange, ok := realignRangeToLineIdentifier(r, expectedName, fileLines)
+	if !ok {
+		return semanticToken{}, false
+	}
+	adjustedToken, ok := tokenFromRange(adjustedRange, tokenType)
+	if !ok {
 		return semanticToken{}, false
 	}
 
-	return token, true
+	return adjustedToken, true
 }
 
 func rangeMatchesFileText(r protocol.Range, expected string, lines []string) bool {
@@ -196,6 +216,77 @@ func rangeMatchesFileText(r protocol.Range, expected string, lines []string) boo
 	}
 
 	return line[start:end] == expected
+}
+
+func realignRangeToLineIdentifier(r protocol.Range, expected string, lines []string) (protocol.Range, bool) {
+	if r.Start.Line != r.End.Line || expected == "" {
+		return protocol.Range{}, false
+	}
+	lineIdx := int(r.Start.Line)
+	if lineIdx < 0 || lineIdx >= len(lines) {
+		return protocol.Range{}, false
+	}
+
+	line := lines[lineIdx]
+	if line == "" {
+		return protocol.Range{}, false
+	}
+
+	startHint := int(r.Start.Character)
+	if startHint < 0 {
+		startHint = 0
+	}
+	if startHint > len(line) {
+		startHint = len(line)
+	}
+
+	windowStart := startHint - 64
+	if windowStart < 0 {
+		windowStart = 0
+	}
+	windowEnd := startHint + len(expected) + 64
+	if windowEnd > len(line) {
+		windowEnd = len(line)
+	}
+	segment := line[windowStart:windowEnd]
+	if segment == "" {
+		return protocol.Range{}, false
+	}
+
+	bestStart := -1
+	searchOffset := 0
+	for searchOffset <= len(segment) {
+		relative := strings.Index(segment[searchOffset:], expected)
+		if relative < 0 {
+			break
+		}
+		candidate := windowStart + searchOffset + relative
+		leftBoundary := candidate == 0 || !isIdentifierByte(line[candidate-1])
+		right := candidate + len(expected)
+		rightBoundary := right >= len(line) || !isIdentifierByte(line[right])
+		if leftBoundary && rightBoundary {
+			if bestStart == -1 || absInt(candidate-startHint) < absInt(bestStart-startHint) {
+				bestStart = candidate
+			}
+		}
+
+		searchOffset += relative + 1
+		if searchOffset >= len(segment) {
+			break
+		}
+	}
+
+	if bestStart < 0 {
+		return protocol.Range{}, false
+	}
+	return spanRange(lineIdx, bestStart, bestStart+len(expected)), true
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // tokenTypeIndex maps legend token names to numeric indices.
@@ -225,26 +316,26 @@ func entityTokenType(kind src.EntityKind, index map[string]int) (int, bool) {
 }
 
 // collectPortTokens walks a connection tree and tokenizes node/port address segments.
-func collectPortTokens(conn src.Connection, index map[string]int, fileLines []string) []semanticToken {
+func collectPortTokens(conn src.Connection, index map[string]int, fileLines []string, fileText string) []semanticToken {
 	var tokens []semanticToken
 	for _, sender := range conn.Senders {
 		if sender.PortAddr != nil {
-			tokens = append(tokens, portAddrTokens(*sender.PortAddr, index, fileLines)...)
+			tokens = append(tokens, portAddrTokens(*sender.PortAddr, index, fileLines, fileText)...)
 		}
 	}
 	for _, receiver := range conn.Receivers {
 		if receiver.PortAddr != nil {
-			tokens = append(tokens, portAddrTokens(*receiver.PortAddr, index, fileLines)...)
+			tokens = append(tokens, portAddrTokens(*receiver.PortAddr, index, fileLines, fileText)...)
 		}
 		if receiver.ChainedConnection != nil {
-			tokens = append(tokens, collectPortTokens(*receiver.ChainedConnection, index, fileLines)...)
+			tokens = append(tokens, collectPortTokens(*receiver.ChainedConnection, index, fileLines, fileText)...)
 		}
 	}
 	return tokens
 }
 
 // portAddrTokens emits separate tokens for node names and port names inside an address.
-func portAddrTokens(addr src.PortAddr, index map[string]int, fileLines []string) []semanticToken {
+func portAddrTokens(addr src.PortAddr, index map[string]int, fileLines []string, fileText string) []semanticToken {
 	var tokens []semanticToken
 
 	if addr.Node != "" && !strings.HasPrefix(addr.Node, ":") {
@@ -257,7 +348,10 @@ func portAddrTokens(addr src.PortAddr, index map[string]int, fileLines []string)
 
 	if addr.Port != "" {
 		if portRange, ok := rangeForPortInPortAddr(addr); ok {
-			if token, tokenOK := tokenFromNamedRange(portRange, index["property"], addr.Port, fileLines); tokenOK {
+			if expandedRange, expanded := normalizeIdentifierRangeInText(portRange, fileText); expanded {
+				portRange = expandedRange
+			}
+			if token, tokenOK := tokenFromRange(portRange, index["property"]); tokenOK {
 				tokens = append(tokens, token)
 			}
 		}
