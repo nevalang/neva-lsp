@@ -1,10 +1,6 @@
 package main
 
-import (
-	src "github.com/nevalang/neva/pkg/ast"
-	"github.com/nevalang/neva/pkg/core"
-	"github.com/nevalang/neva/pkg/view"
-)
+import "github.com/nevalang/neva/pkg/view"
 
 const (
 	methodGetProgramView    = "neva/view/getProgram"
@@ -21,16 +17,15 @@ type GetFileViewRequest struct {
 	FileID string `json:"fileId"`
 }
 
-// ResolveEntityRefRequest resolves an entity reference from a file context.
+// ResolveEntityRefRequest resolves an entity by canonical target address.
 type ResolveEntityRefRequest struct {
-	FileID        string         `json:"fileId"`
-	EntityRef     core.EntityRef `json:"entityRef"`
-	OverloadIndex *int           `json:"overloadIndex,omitempty"`
+	TargetFileID   string `json:"targetFileId"`
+	TargetEntityID string `json:"targetEntityId"`
 }
 
 // ResolveEntityRefResult returns canonical navigation target information.
 type ResolveEntityRefResult struct {
-	TargetKind     src.EntityKind    `json:"targetKind"`
+	TargetKind     string            `json:"targetKind"`
 	TargetName     string            `json:"targetName"`
 	TargetFileID   string            `json:"targetFileId"`
 	TargetEntityID string            `json:"targetEntityId"`

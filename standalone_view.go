@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	src "github.com/nevalang/neva/pkg/ast"
+	ast "github.com/nevalang/neva/pkg/ast"
 	"github.com/nevalang/neva/pkg/indexer"
 	"github.com/nevalang/neva/pkg/view"
 	"github.com/tliron/commonlog"
@@ -77,42 +77,24 @@ func runStandaloneView(logger commonlog.Logger, workspacePath string, listenAddr
 	return server.ListenAndServe()
 }
 
-func resolveEntityRefInBuild(build *src.Build, params ResolveEntityRefRequest) (ResolveEntityRefResult, error) {
-	if params.FileID == "" {
-		return ResolveEntityRefResult{}, errors.New("fileId is required")
+func resolveEntityRefInBuild(build *ast.Build, params ResolveEntityRefRequest) (ResolveEntityRefResult, error) {
+	if params.TargetFileID == "" {
+		return ResolveEntityRefResult{}, errors.New("targetFileId is required")
 	}
-	if params.EntityRef.Name == "" {
-		return ResolveEntityRefResult{}, errors.New("entityRef.name is required")
+	if params.TargetEntityID == "" {
+		return ResolveEntityRefResult{}, errors.New("targetEntityId is required")
 	}
 
-	loc, found := fileLocationByID(build, params.FileID)
+	fileView, found := view.ProjectFileByID(*build, params.TargetFileID)
 	if !found {
-		return ResolveEntityRefResult{}, fmt.Errorf("file not found: %s", params.FileID)
+		return ResolveEntityRefResult{}, fmt.Errorf("file not found: %s", params.TargetFileID)
 	}
 
-	scope := src.NewScope(*build, loc)
-	entity, targetLoc, err := scope.Entity(params.EntityRef)
-	if err != nil {
-		return ResolveEntityRefResult{}, fmt.Errorf("resolve entity ref: %w", err)
+	result, found := findEntityInFile(fileView, params.TargetEntityID)
+	if !found {
+		return ResolveEntityRefResult{}, fmt.Errorf("entity not found: %s", params.TargetEntityID)
 	}
-
-	anchor := view.SourceAnchor{
-		ModulePath:    targetLoc.ModRef.Path,
-		ModuleVersion: targetLoc.ModRef.Version,
-		Package:       targetLoc.Package,
-		File:          targetLoc.Filename,
-	}
-	if meta := entity.Meta(); meta != nil {
-		anchor = viewAnchorFromMeta(*meta)
-	}
-
-	return ResolveEntityRefResult{
-		TargetKind:     entity.Kind,
-		TargetName:     params.EntityRef.Name,
-		TargetFileID:   view.ResolveFileID(targetLoc),
-		TargetEntityID: view.ResolveEntityID(targetLoc, params.EntityRef.Name, entity.Kind, params.OverloadIndex),
-		TargetAnchor:   anchor,
-	}, nil
+	return result, nil
 }
 
 func writeJSON(w http.ResponseWriter, payload any) {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/nevalang/neva/pkg/core"
 	"github.com/nevalang/neva/pkg/view"
 )
 
@@ -67,19 +66,24 @@ def Main(start any) (stop any) {
 	}
 }
 
-func TestViewAPI_ResolveEntityRef_LocalImportedBuiltin(t *testing.T) {
+func TestViewAPI_ResolveEntityRef_ByCanonicalAddress(t *testing.T) {
 	t.Parallel()
 
 	mainFile := `
 import {
-	fmt
+	runtime
 }
 
+const Greeting string = 'Hello'
+type Name string
+interface Printer(data any) (res any)
+
 def Main(start any) (stop any) {
+	panic runtime.Panic
 	echo Echo
 	---
 	:start -> echo:data
-	echo:res -> :stop
+	echo:res -> [panic, :stop]
 }
 
 def Echo(data any) (res any) {
@@ -95,45 +99,71 @@ def Echo(data any) (res any) {
 	}
 	program := programAny.(view.Program)
 	fileID := firstFileID(t, program)
-
-	localAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
-		FileID:    fileID,
-		EntityRef: core.EntityRef{Name: "Echo"},
-	})
+	fileAny, err := server.GetFileView(nil, GetFileViewRequest{FileID: fileID})
 	if err != nil {
-		t.Fatalf("ResolveEntityRef(local) error = %v", err)
+		t.Fatalf("GetFileView() error = %v", err)
 	}
-	local := localAny.(ResolveEntityRefResult)
-	if local.TargetKind == "" || local.TargetFileID == "" || local.TargetEntityID == "" {
-		t.Fatalf("ResolveEntityRef(local) incomplete result: %#v", local)
+	fileView := fileAny.(view.File)
+
+	mainComponent := findComponentByName(fileView, "Main")
+	if mainComponent == nil || len(mainComponent.Nodes) == 0 || mainComponent.Nodes[0].ResolvedRef == nil {
+		t.Fatalf("expected resolved node reference in file view")
 	}
 
-	importedAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
-		FileID: fileID,
-		EntityRef: core.EntityRef{
-			Pkg:  "fmt",
-			Name: "Println",
-		},
+	resolved := mainComponent.Nodes[0].ResolvedRef
+	nodeTargetAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
+		TargetFileID:   resolved.FileID,
+		TargetEntityID: resolved.EntityID,
 	})
 	if err != nil {
-		t.Fatalf("ResolveEntityRef(imported) error = %v", err)
+		t.Fatalf("ResolveEntityRef(node target) error = %v", err)
 	}
-	imported := importedAny.(ResolveEntityRefResult)
-	if imported.TargetAnchor.Package != "fmt" {
-		t.Fatalf("ResolveEntityRef(imported) package = %q, want fmt", imported.TargetAnchor.Package)
+	nodeTarget := nodeTargetAny.(ResolveEntityRefResult)
+	if nodeTarget.TargetKind == "" || nodeTarget.TargetEntityID == "" {
+		t.Fatalf("ResolveEntityRef(node target) incomplete result: %#v", nodeTarget)
 	}
 
-	builtinAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
-		FileID:    fileID,
-		EntityRef: core.EntityRef{Name: "int"},
+	constTargetAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
+		TargetFileID:   fileID,
+		TargetEntityID: fileView.Consts[0].ID,
 	})
 	if err != nil {
-		t.Fatalf("ResolveEntityRef(builtin) error = %v", err)
+		t.Fatalf("ResolveEntityRef(const) error = %v", err)
 	}
-	builtin := builtinAny.(ResolveEntityRefResult)
-	if builtin.TargetAnchor.Package != "builtin" {
-		t.Fatalf("ResolveEntityRef(builtin) package = %q, want builtin", builtin.TargetAnchor.Package)
+	if got := constTargetAny.(ResolveEntityRefResult).TargetKind; got != "const_entity" {
+		t.Fatalf("ResolveEntityRef(const) kind = %q, want const_entity", got)
 	}
+
+	typeTargetAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
+		TargetFileID:   fileID,
+		TargetEntityID: fileView.Types[0].ID,
+	})
+	if err != nil {
+		t.Fatalf("ResolveEntityRef(type) error = %v", err)
+	}
+	if got := typeTargetAny.(ResolveEntityRefResult).TargetKind; got != "type_entity" {
+		t.Fatalf("ResolveEntityRef(type) kind = %q, want type_entity", got)
+	}
+
+	ifaceTargetAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
+		TargetFileID:   fileID,
+		TargetEntityID: fileView.Interfaces[0].ID,
+	})
+	if err != nil {
+		t.Fatalf("ResolveEntityRef(interface) error = %v", err)
+	}
+	if got := ifaceTargetAny.(ResolveEntityRefResult).TargetKind; got != "interface_entity" {
+		t.Fatalf("ResolveEntityRef(interface) kind = %q, want interface_entity", got)
+	}
+}
+
+func findComponentByName(file view.File, name string) *view.Component {
+	for idx := range file.Components {
+		if file.Components[idx].Name == name {
+			return &file.Components[idx]
+		}
+	}
+	return nil
 }
 
 func firstFileID(t *testing.T, program view.Program) string {

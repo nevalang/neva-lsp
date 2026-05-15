@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	src "github.com/nevalang/neva/pkg/ast"
-	"github.com/nevalang/neva/pkg/core"
 	"github.com/nevalang/neva/pkg/view"
 	"github.com/tliron/glsp"
 )
@@ -38,11 +37,11 @@ func (s *Server) GetFileView(_ *glsp.Context, params GetFileViewRequest) (any, e
 }
 
 func (s *Server) ResolveEntityRef(_ *glsp.Context, params ResolveEntityRefRequest) (any, error) {
-	if params.FileID == "" {
-		return nil, errors.New("fileId is required")
+	if params.TargetFileID == "" {
+		return nil, errors.New("targetFileId is required")
 	}
-	if params.EntityRef.Name == "" {
-		return nil, errors.New("entityRef.name is required")
+	if params.TargetEntityID == "" {
+		return nil, errors.New("targetEntityId is required")
 	}
 
 	build, ok := s.getBuild()
@@ -50,34 +49,16 @@ func (s *Server) ResolveEntityRef(_ *glsp.Context, params ResolveEntityRefReques
 		return nil, errors.New("program index is not ready")
 	}
 
-	loc, found := fileLocationByID(build, params.FileID)
+	fileView, found := view.ProjectFileByID(*build, params.TargetFileID)
 	if !found {
-		return nil, fmt.Errorf("file not found: %s", params.FileID)
+		return nil, fmt.Errorf("file not found: %s", params.TargetFileID)
 	}
 
-	scope := src.NewScope(*build, loc)
-	entity, targetLoc, err := scope.Entity(params.EntityRef)
-	if err != nil {
-		return nil, fmt.Errorf("resolve entity ref: %w", err)
+	result, found := findEntityInFile(fileView, params.TargetEntityID)
+	if !found {
+		return nil, fmt.Errorf("entity not found: %s", params.TargetEntityID)
 	}
-
-	anchor := view.SourceAnchor{
-		ModulePath:    targetLoc.ModRef.Path,
-		ModuleVersion: targetLoc.ModRef.Version,
-		Package:       targetLoc.Package,
-		File:          targetLoc.Filename,
-	}
-	if meta := entity.Meta(); meta != nil {
-		anchor = viewAnchorFromMeta(*meta)
-	}
-
-	return ResolveEntityRefResult{
-		TargetKind:     entity.Kind,
-		TargetName:     params.EntityRef.Name,
-		TargetFileID:   view.ResolveFileID(targetLoc),
-		TargetEntityID: view.ResolveEntityID(targetLoc, params.EntityRef.Name, entity.Kind, params.OverloadIndex),
-		TargetAnchor:   anchor,
-	}, nil
+	return result, nil
 }
 
 func (s *Server) ResolveFileLegacy(_ *glsp.Context, params LegacyGetFileViewRequest) (any, error) {
@@ -103,30 +84,54 @@ func (s *Server) ResolveFileLegacy(_ *glsp.Context, params LegacyGetFileViewRequ
 	}, nil
 }
 
-func fileLocationByID(build *src.Build, wantedID string) (core.Location, bool) {
-	for modRef, mod := range build.Modules {
-		for packageName, pkg := range mod.Packages {
-			for fileName := range pkg {
-				loc := core.Location{ModRef: modRef, Package: packageName, Filename: fileName}
-				if view.ResolveFileID(loc) == wantedID {
-					return loc, true
-				}
-			}
+func findEntityInFile(file view.File, targetEntityID string) (ResolveEntityRefResult, bool) {
+	for _, component := range file.Components {
+		if component.ID == targetEntityID {
+			return ResolveEntityRefResult{
+				TargetKind:     "component_entity",
+				TargetName:     component.Name,
+				TargetFileID:   file.ID,
+				TargetEntityID: component.ID,
+				TargetAnchor:   component.Anchor,
+			}, true
 		}
 	}
-	return core.Location{}, false
-}
 
-func viewAnchorFromMeta(meta core.Meta) view.SourceAnchor {
-	return view.SourceAnchor{
-		ModulePath:    meta.Location.ModRef.Path,
-		ModuleVersion: meta.Location.ModRef.Version,
-		Package:       meta.Location.Package,
-		File:          meta.Location.Filename,
-		Text:          meta.Text,
-		StartLine:     meta.Start.Line,
-		StartCol:      meta.Start.Column,
-		EndLine:       meta.Stop.Line,
-		EndCol:        meta.Stop.Column,
+	for _, iface := range file.Interfaces {
+		if iface.ID == targetEntityID {
+			return ResolveEntityRefResult{
+				TargetKind:     "interface_entity",
+				TargetName:     iface.Name,
+				TargetFileID:   file.ID,
+				TargetEntityID: iface.ID,
+				TargetAnchor:   iface.Anchor,
+			}, true
+		}
 	}
+
+	for _, typ := range file.Types {
+		if typ.ID == targetEntityID {
+			return ResolveEntityRefResult{
+				TargetKind:     "type_entity",
+				TargetName:     typ.Name,
+				TargetFileID:   file.ID,
+				TargetEntityID: typ.ID,
+				TargetAnchor:   typ.Anchor,
+			}, true
+		}
+	}
+
+	for _, cnst := range file.Consts {
+		if cnst.ID == targetEntityID {
+			return ResolveEntityRefResult{
+				TargetKind:     "const_entity",
+				TargetName:     cnst.Name,
+				TargetFileID:   file.ID,
+				TargetEntityID: cnst.ID,
+				TargetAnchor:   cnst.Anchor,
+			}, true
+		}
+	}
+
+	return ResolveEntityRefResult{}, false
 }
