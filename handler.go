@@ -15,7 +15,10 @@ import (
 type Handler struct {
 	*protocol.Handler
 
-	GetFileView func(glspCtx *glsp.Context, params GetFileViewRequest) (GetFileViewResponce, error)
+	GetProgramView    func(glspCtx *glsp.Context, params GetProgramViewRequest) (any, error)
+	GetFileView       func(glspCtx *glsp.Context, params GetFileViewRequest) (any, error)
+	ResolveEntityRef  func(glspCtx *glsp.Context, params ResolveEntityRefRequest) (any, error)
+	ResolveFileLegacy func(glspCtx *glsp.Context, params LegacyGetFileViewRequest) (any, error)
 }
 
 func (h Handler) Handle(glspCtx *glsp.Context) (response any, validMethod bool, validParams bool, err error) {
@@ -23,17 +26,48 @@ func (h Handler) Handle(glspCtx *glsp.Context) (response any, validMethod bool, 
 		return nil, true, true, errors.New("server not initialized")
 	}
 
-	if glspCtx.Method == "resolve_file" {
+	switch glspCtx.Method {
+	case methodGetProgramView:
+		var params GetProgramViewRequest
+		if len(glspCtx.Params) != 0 {
+			if err := json.Unmarshal(glspCtx.Params, &params); err != nil {
+				return nil, true, false, err
+			}
+		}
+		resp, err := h.GetProgramView(glspCtx, params)
+		if err != nil {
+			return nil, true, true, err
+		}
+		return resp, true, true, nil
+	case methodGetFileView:
 		var params GetFileViewRequest
 		if err := json.Unmarshal(glspCtx.Params, &params); err != nil {
 			return nil, true, false, err
 		}
-
 		resp, err := h.GetFileView(glspCtx, params)
 		if err != nil {
 			return nil, true, true, err
 		}
-
+		return resp, true, true, nil
+	case methodResolveEntityRef:
+		var params ResolveEntityRefRequest
+		if err := json.Unmarshal(glspCtx.Params, &params); err != nil {
+			return nil, true, false, err
+		}
+		resp, err := h.ResolveEntityRef(glspCtx, params)
+		if err != nil {
+			return nil, true, true, err
+		}
+		return resp, true, true, nil
+	case methodResolveFileLegacy:
+		var params LegacyGetFileViewRequest
+		if err := json.Unmarshal(glspCtx.Params, &params); err != nil {
+			return nil, true, false, err
+		}
+		resp, err := h.ResolveFileLegacy(glspCtx, params)
+		if err != nil {
+			return nil, true, true, err
+		}
 		return resp, true, true, nil
 	}
 
@@ -61,6 +95,11 @@ func BuildHandler(logger commonlog.Logger, serverName string, indexer indexer.In
 		openDocsMutex:   &sync.Mutex{},
 		openDocs:        make(map[string]string),
 	}
+
+	h.GetProgramView = s.GetProgramView
+	h.GetFileView = s.GetFileView
+	h.ResolveEntityRef = s.ResolveEntityRef
+	h.ResolveFileLegacy = s.ResolveFileLegacy
 
 	// Basic
 	h.CancelRequest = func(_ *glsp.Context, params *protocol.CancelParams) error {
