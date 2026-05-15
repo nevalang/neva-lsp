@@ -74,8 +74,8 @@ func (s *Server) ResolveEntityRef(_ *glsp.Context, params ResolveEntityRefReques
 	return ResolveEntityRefResult{
 		TargetKind:     entity.Kind,
 		TargetName:     params.EntityRef.Name,
-		TargetFileID:   view.ResolveFileViewID(targetLoc),
-		TargetEntityID: view.ResolveEntityViewID(targetLoc, params.EntityRef.Name, entity.Kind, params.OverloadIndex),
+		TargetFileID:   view.ResolveFileID(targetLoc),
+		TargetEntityID: view.ResolveEntityID(targetLoc, params.EntityRef.Name, entity.Kind, params.OverloadIndex),
 		TargetAnchor:   anchor,
 	}, nil
 }
@@ -108,7 +108,7 @@ func fileLocationByID(build *src.Build, wantedID string) (core.Location, bool) {
 		for packageName, pkg := range mod.Packages {
 			for fileName := range pkg {
 				loc := core.Location{ModRef: modRef, Package: packageName, Filename: fileName}
-				if view.ResolveFileViewID(loc) == wantedID {
+				if view.ResolveFileID(loc) == wantedID {
 					return loc, true
 				}
 			}

@@ -32,9 +32,9 @@ def Main(start any) (stop any) {
 	if err != nil {
 		t.Fatalf("GetProgramView() error = %v", err)
 	}
-	program, ok := programAny.(view.ProgramView)
+	program, ok := programAny.(view.Program)
 	if !ok {
-		t.Fatalf("GetProgramView() type = %T, want view.ProgramView", programAny)
+		t.Fatalf("GetProgramView() type = %T, want view.Program", programAny)
 	}
 	fileID := firstFileID(t, program)
 
@@ -42,9 +42,9 @@ def Main(start any) (stop any) {
 	if err != nil {
 		t.Fatalf("GetFileView() error = %v", err)
 	}
-	fileView, ok := fileAny.(view.FileView)
+	fileView, ok := fileAny.(view.File)
 	if !ok {
-		t.Fatalf("GetFileView() type = %T, want view.FileView", fileAny)
+		t.Fatalf("GetFileView() type = %T, want view.File", fileAny)
 	}
 	if fileView.Name != "main" {
 		t.Fatalf("GetFileView() file name = %q, want main", fileView.Name)
@@ -93,7 +93,7 @@ def Echo(data any) (res any) {
 	if err != nil {
 		t.Fatalf("GetProgramView() error = %v", err)
 	}
-	program := programAny.(view.ProgramView)
+	program := programAny.(view.Program)
 	fileID := firstFileID(t, program)
 
 	localAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
@@ -136,7 +136,7 @@ def Echo(data any) (res any) {
 	}
 }
 
-func firstFileID(t *testing.T, program view.ProgramView) string {
+func firstFileID(t *testing.T, program view.Program) string {
 	t.Helper()
 	for _, module := range program.Modules {
 		for _, pkg := range module.Packages {

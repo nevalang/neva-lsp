@@ -109,8 +109,8 @@ func resolveEntityRefInBuild(build *src.Build, params ResolveEntityRefRequest) (
 	return ResolveEntityRefResult{
 		TargetKind:     entity.Kind,
 		TargetName:     params.EntityRef.Name,
-		TargetFileID:   view.ResolveFileViewID(targetLoc),
-		TargetEntityID: view.ResolveEntityViewID(targetLoc, params.EntityRef.Name, entity.Kind, params.OverloadIndex),
+		TargetFileID:   view.ResolveFileID(targetLoc),
+		TargetEntityID: view.ResolveEntityID(targetLoc, params.EntityRef.Name, entity.Kind, params.OverloadIndex),
 		TargetAnchor:   anchor,
 	}, nil
 }
