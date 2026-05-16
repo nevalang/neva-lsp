@@ -122,6 +122,20 @@ def Echo(data any) (res any) {
 	if nodeTarget.TargetKind == "" || nodeTarget.TargetEntityID == "" {
 		t.Fatalf("ResolveEntityRef(node target) incomplete result: %#v", nodeTarget)
 	}
+	if nodeTarget.TargetKind != "component_entity" {
+		t.Fatalf("ResolveEntityRef(node target) kind = %q, want component_entity", nodeTarget.TargetKind)
+	}
+
+	componentTargetAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
+		TargetFileID:   fileID,
+		TargetEntityID: fileView.Components[0].ID,
+	})
+	if err != nil {
+		t.Fatalf("ResolveEntityRef(component) error = %v", err)
+	}
+	if got := componentTargetAny.(ResolveEntityRefResult).TargetKind; got != "component_entity" {
+		t.Fatalf("ResolveEntityRef(component) kind = %q, want component_entity", got)
+	}
 
 	constTargetAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
 		TargetFileID:   fileID,
@@ -154,6 +168,32 @@ def Echo(data any) (res any) {
 	}
 	if got := ifaceTargetAny.(ResolveEntityRefResult).TargetKind; got != "interface_entity" {
 		t.Fatalf("ResolveEntityRef(interface) kind = %q, want interface_entity", got)
+	}
+}
+
+func TestViewAPI_ResolveEntityRef_NotFound(t *testing.T) {
+	t.Parallel()
+
+	mainFile := `
+def Main(start any) (stop any) {
+	:start -> :stop
+}
+`
+	server, _, _ := buildIndexedServerWithSingleMainFile(t, mainFile)
+
+	programAny, err := server.GetProgramView(nil, GetProgramViewRequest{})
+	if err != nil {
+		t.Fatalf("GetProgramView() error = %v", err)
+	}
+	program := programAny.(view.Program)
+	fileID := firstFileID(t, program)
+
+	_, err = server.ResolveEntityRef(nil, ResolveEntityRefRequest{
+		TargetFileID:   fileID,
+		TargetEntityID: "module/@/package/main/file/main/component/DoesNotExist@0",
+	})
+	if err == nil {
+		t.Fatal("ResolveEntityRef(not found) error=nil, want error")
 	}
 }
 
