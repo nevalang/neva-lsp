@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 
 	"github.com/nevalang/neva/pkg/indexer"
 	"github.com/tliron/commonlog"
@@ -11,11 +12,11 @@ import (
 
 func main() {
 	const serverName = "neva"
+	const defaultStandalonePort = 7788
 
 	isDebug := flag.Bool("debug", false, "-debug")
-	standaloneView := flag.Bool("standalone-view", false, "-standalone-view")
-	viewWorkspace := flag.String("view-workspace", ".", "-view-workspace")
-	viewListen := flag.String("view-listen", "127.0.0.1:7788", "-view-listen")
+	standaloneView := flag.Bool("view", false, "-view")
+	viewPort := flag.Int("view-port", defaultStandalonePort, "-view-port")
 	viewOpen := flag.Bool("view-open", false, "-view-open")
 	flag.Parse()
 
@@ -28,7 +29,11 @@ func main() {
 	logger := commonlog.GetLoggerf("%s.server", serverName)
 
 	if *standaloneView {
-		if err := runStandaloneView(logger, *viewWorkspace, *viewListen, *viewOpen); err != nil {
+		listenAddr, err := standaloneListenAddr(*viewPort)
+		if err != nil {
+			panic(err)
+		}
+		if err := runStandaloneView(logger, ".", listenAddr, *viewOpen); err != nil {
 			panic(err)
 		}
 		return
@@ -53,4 +58,11 @@ func main() {
 			panic(err)
 		}
 	}
+}
+
+func standaloneListenAddr(port int) (string, error) {
+	if port < 1 || port > 65535 {
+		return "", fmt.Errorf("view-port must be in range [1,65535], got %d", port)
+	}
+	return fmt.Sprintf("127.0.0.1:%d", port), nil
 }
