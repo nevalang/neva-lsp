@@ -8,8 +8,13 @@ const (
 	methodResolveEntityRef = "neva/view/resolveEntityRef"
 )
 
-// GetProgramViewRequest is currently empty and reserved for future filters.
-type GetProgramViewRequest struct{}
+// GetProgramViewRequest controls optional server-side explorer filtering.
+// Zero-value keeps backward-compatible behavior (all groups included).
+type GetProgramViewRequest struct {
+	IncludeCurrent *bool `json:"includeCurrent,omitempty"`
+	IncludeDeps    *bool `json:"includeDeps,omitempty"`
+	IncludeStd     *bool `json:"includeStd,omitempty"`
+}
 
 // GetFileViewRequest requests one file view by stable file ID.
 type GetFileViewRequest struct {
