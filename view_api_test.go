@@ -66,6 +66,66 @@ def Main(start any) (stop any) {
 	}
 }
 
+func TestViewAPI_GetProgram_FilterGroups(t *testing.T) {
+	t.Parallel()
+
+	mainFile := `
+def Main(start any) (stop any) {
+	echo Echo
+	---
+	:start -> echo:data
+	echo:res -> :stop
+}
+
+def Echo(data any) (res any) {
+	:data -> :res
+}
+`
+
+	server, _, _ := buildIndexedServerWithSingleMainFile(t, mainFile)
+
+	allAny, err := server.GetProgramView(nil, GetProgramViewRequest{})
+	if err != nil {
+		t.Fatalf("GetProgramView(all) error = %v", err)
+	}
+	all := allAny.(view.Program)
+	if len(all.Modules) == 0 {
+		t.Fatal("GetProgramView(all) returned empty module list")
+	}
+	if countModulesByKind(all, "current") == 0 {
+		t.Fatal("GetProgramView(all) missing current module")
+	}
+	if countModulesByKind(all, "std") == 0 {
+		t.Fatal("GetProgramView(all) missing std module")
+	}
+
+	currentOnlyAny, err := server.GetProgramView(nil, GetProgramViewRequest{
+		IncludeCurrent: boolRef(true),
+		IncludeDeps:    boolRef(false),
+		IncludeStd:     boolRef(false),
+	})
+	if err != nil {
+		t.Fatalf("GetProgramView(current-only) error = %v", err)
+	}
+	currentOnly := currentOnlyAny.(view.Program)
+	if len(currentOnly.Modules) != countModulesByKind(currentOnly, "current") {
+		t.Fatalf("GetProgramView(current-only) returned non-current modules: %#v", currentOnly.Modules)
+	}
+
+	stdOnlyAny, err := server.GetProgramView(nil, GetProgramViewRequest{
+		IncludeCurrent: boolRef(false),
+		IncludeDeps:    boolRef(false),
+		IncludeStd:     boolRef(true),
+	})
+	if err != nil {
+		t.Fatalf("GetProgramView(std-only) error = %v", err)
+	}
+	stdOnly := stdOnlyAny.(view.Program)
+	if len(stdOnly.Modules) != countModulesByKind(stdOnly, "std") {
+		t.Fatalf("GetProgramView(std-only) returned non-std modules: %#v", stdOnly.Modules)
+	}
+}
+
 func TestViewAPI_ResolveEntityRef_ByCanonicalAddress(t *testing.T) {
 	t.Parallel()
 
@@ -341,4 +401,29 @@ func entityIDExists(file view.File, entityID string) bool {
 		}
 	}
 	return false
+}
+
+func countModulesByKind(program view.Program, kind string) int {
+	count := 0
+	for _, module := range program.Modules {
+		switch kind {
+		case "current":
+			if module.Path == "@" {
+				count++
+			}
+		case "std":
+			if module.Path == "std" {
+				count++
+			}
+		case "deps":
+			if module.Path != "@" && module.Path != "std" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func boolRef(value bool) *bool {
+	return &value
 }
