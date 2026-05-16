@@ -170,7 +170,7 @@ func firstFileID(t *testing.T, program view.Program) string {
 	t.Helper()
 	for _, module := range program.Modules {
 		for _, pkg := range module.Packages {
-			for _, file := range pkg.Files {
+			for _, file := range pkg.FileSummaries {
 				return file.ID
 			}
 		}

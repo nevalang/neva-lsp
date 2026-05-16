@@ -5,7 +5,7 @@ go 1.26
 toolchain go1.26.3
 
 require (
-	github.com/nevalang/neva v0.34.1-0.20260219170217-3675acc6f947
+	github.com/nevalang/neva v0.37.0
 	github.com/tliron/commonlog v0.2.10
 	github.com/tliron/glsp v0.2.2
 )
@@ -50,5 +50,3 @@ require (
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/nevalang/neva => ../neva
