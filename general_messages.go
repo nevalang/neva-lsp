@@ -6,7 +6,14 @@ import (
 )
 
 func (s *Server) Initialize(glspCtx *glsp.Context, params *protocol.InitializeParams) (any, error) {
-	s.workspacePath = *params.RootPath
+	if params.RootPath != nil {
+		s.workspacePath = *params.RootPath
+	} else if params.RootURI != nil {
+		path, err := uriToPath(string(*params.RootURI))
+		if err == nil {
+			s.workspacePath = path
+		}
+	}
 
 	capabilities := s.handler.CreateServerCapabilities()
 	if capabilities.CodeLensProvider != nil {

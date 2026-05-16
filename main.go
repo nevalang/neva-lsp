@@ -13,6 +13,10 @@ func main() {
 	const serverName = "neva"
 
 	isDebug := flag.Bool("debug", false, "-debug")
+	standaloneView := flag.Bool("standalone-view", false, "-standalone-view")
+	viewWorkspace := flag.String("view-workspace", ".", "-view-workspace")
+	viewListen := flag.String("view-listen", "127.0.0.1:7788", "-view-listen")
+	viewOpen := flag.Bool("view-open", false, "-view-open")
 	flag.Parse()
 
 	loglvl := 1
@@ -22,6 +26,13 @@ func main() {
 
 	commonlog.Configure(loglvl, nil)
 	logger := commonlog.GetLoggerf("%s.server", serverName)
+
+	if *standaloneView {
+		if err := runStandaloneView(logger, *viewWorkspace, *viewListen, *viewOpen); err != nil {
+			panic(err)
+		}
+		return
+	}
 
 	indexer := indexer.MustNewDefault(logger)
 
