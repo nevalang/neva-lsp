@@ -197,6 +197,91 @@ def Main(start any) (stop any) {
 	}
 }
 
+func TestViewAPI_NavigationMainToStdDependency(t *testing.T) {
+	t.Parallel()
+
+	mainFile := `
+import {
+	runtime
+}
+
+def Main(start any) (stop any) {
+	panic runtime.Panic
+	echo Echo
+	---
+	:start -> echo:data
+	echo:res -> [panic, :stop]
+}
+
+def Echo(data any) (res any) {
+	:data -> :res
+}
+`
+
+	server, _, _ := buildIndexedServerWithSingleMainFile(t, mainFile)
+
+	programAny, err := server.GetProgramView(nil, GetProgramViewRequest{})
+	if err != nil {
+		t.Fatalf("GetProgramView() error = %v", err)
+	}
+	program := programAny.(view.Program)
+	mainID := mainFileID(t, program)
+
+	mainAny, err := server.GetFileView(nil, GetFileViewRequest{FileID: mainID})
+	if err != nil {
+		t.Fatalf("GetFileView(main) error = %v", err)
+	}
+	mainView := mainAny.(view.File)
+	mainComponent := findComponentByName(mainView, "Main")
+	if mainComponent == nil {
+		t.Fatal("Main component not found in main file view")
+	}
+
+	var panicRef *view.ResolvedRef
+	for i := range mainComponent.Nodes {
+		node := mainComponent.Nodes[i]
+		if node.Name == "panic" {
+			panicRef = node.ResolvedRef
+			break
+		}
+	}
+	if panicRef == nil {
+		t.Fatal("resolved ref for panic node not found")
+	}
+	if panicRef.FileID == mainID {
+		t.Fatalf("expected dependency target file, got same file id %q", panicRef.FileID)
+	}
+
+	targetAny, err := server.ResolveEntityRef(nil, ResolveEntityRefRequest{
+		TargetFileID:   panicRef.FileID,
+		TargetEntityID: panicRef.EntityID,
+	})
+	if err != nil {
+		t.Fatalf("ResolveEntityRef(std target) error = %v", err)
+	}
+	target := targetAny.(ResolveEntityRefResult)
+	if target.TargetKind != "component_entity" {
+		t.Fatalf("ResolveEntityRef(std target) kind = %q, want component_entity", target.TargetKind)
+	}
+	if target.TargetFileID != panicRef.FileID || target.TargetEntityID != panicRef.EntityID {
+		t.Fatalf("ResolveEntityRef(std target) mismatch: got (%q,%q), want (%q,%q)",
+			target.TargetFileID,
+			target.TargetEntityID,
+			panicRef.FileID,
+			panicRef.EntityID,
+		)
+	}
+
+	targetFileAny, err := server.GetFileView(nil, GetFileViewRequest{FileID: target.TargetFileID})
+	if err != nil {
+		t.Fatalf("GetFileView(target) error = %v", err)
+	}
+	targetFile := targetFileAny.(view.File)
+	if !entityIDExists(targetFile, target.TargetEntityID) {
+		t.Fatalf("target entity %q not found in target file %q", target.TargetEntityID, target.TargetFileID)
+	}
+}
+
 func findComponentByName(file view.File, name string) *view.Component {
 	for idx := range file.Components {
 		if file.Components[idx].Name == name {
@@ -217,4 +302,43 @@ func firstFileID(t *testing.T, program view.Program) string {
 	}
 	t.Fatal("no files in program")
 	return ""
+}
+
+func mainFileID(t *testing.T, program view.Program) string {
+	t.Helper()
+	for _, module := range program.Modules {
+		for _, pkg := range module.Packages {
+			for _, file := range pkg.FileSummaries {
+				if file.Name == "main" {
+					return file.ID
+				}
+			}
+		}
+	}
+	t.Fatal("main file not found in program")
+	return ""
+}
+
+func entityIDExists(file view.File, entityID string) bool {
+	for _, c := range file.Components {
+		if c.ID == entityID {
+			return true
+		}
+	}
+	for _, i := range file.Interfaces {
+		if i.ID == entityID {
+			return true
+		}
+	}
+	for _, tp := range file.Types {
+		if tp.ID == entityID {
+			return true
+		}
+	}
+	for _, cn := range file.Consts {
+		if cn.ID == entityID {
+			return true
+		}
+	}
+	return false
 }
