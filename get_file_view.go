@@ -25,3 +25,8 @@ type LegacyGetFileViewResponse struct {
 type Extra struct {
 	NodesPorts map[string]map[string]src.Interface `json:"nodesPorts"` // flows -> nodes -> interface
 }
+
+// LEGACY NOTE:
+// `resolve_file` request/response structures are intentionally kept only as
+// historical reference during neva/view migration.
+// The legacy handler is no longer registered in LSP dispatch.

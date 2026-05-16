@@ -49,6 +49,8 @@ func (s *Server) ResolveEntityRef(_ *glsp.Context, params ResolveEntityRefReques
 		return nil, errors.New("program index is not ready")
 	}
 
+	// ResolveEntityRef works on canonical IDs produced by pkg/view projection.
+	// It is a stable lookup by normalized address, not a fresh scope-based AST resolve.
 	fileView, found := view.ProjectFileByID(*build, params.TargetFileID)
 	if !found {
 		return nil, fmt.Errorf("file not found: %s", params.TargetFileID)
@@ -61,6 +63,10 @@ func (s *Server) ResolveEntityRef(_ *glsp.Context, params ResolveEntityRefReques
 	return result, nil
 }
 
+// ResolveFileLegacy is retained only as migration reference.
+// It is intentionally NOT registered in LSP method dispatch anymore.
+//
+// Deprecated: use neva/view/getFileView.
 func (s *Server) ResolveFileLegacy(_ *glsp.Context, params LegacyGetFileViewRequest) (any, error) {
 	s.logger.Info("resolve_file is deprecated; use neva/view/getFileView")
 

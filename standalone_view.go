@@ -85,6 +85,8 @@ func resolveEntityRefInBuild(build *ast.Build, params ResolveEntityRefRequest) (
 		return ResolveEntityRefResult{}, errors.New("targetEntityId is required")
 	}
 
+	// Standalone view mirrors LSP behavior: IDs are canonicalized in pkg/view
+	// projection, then resolved by deterministic lookup.
 	fileView, found := view.ProjectFileByID(*build, params.TargetFileID)
 	if !found {
 		return ResolveEntityRefResult{}, fmt.Errorf("file not found: %s", params.TargetFileID)

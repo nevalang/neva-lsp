@@ -15,10 +15,9 @@ import (
 type Handler struct {
 	*protocol.Handler
 
-	GetProgramView    func(glspCtx *glsp.Context, params GetProgramViewRequest) (any, error)
-	GetFileView       func(glspCtx *glsp.Context, params GetFileViewRequest) (any, error)
-	ResolveEntityRef  func(glspCtx *glsp.Context, params ResolveEntityRefRequest) (any, error)
-	ResolveFileLegacy func(glspCtx *glsp.Context, params LegacyGetFileViewRequest) (any, error)
+	GetProgramView   func(glspCtx *glsp.Context, params GetProgramViewRequest) (any, error)
+	GetFileView      func(glspCtx *glsp.Context, params GetFileViewRequest) (any, error)
+	ResolveEntityRef func(glspCtx *glsp.Context, params ResolveEntityRefRequest) (any, error)
 }
 
 func (h Handler) Handle(glspCtx *glsp.Context) (response any, validMethod bool, validParams bool, err error) {
@@ -59,16 +58,6 @@ func (h Handler) Handle(glspCtx *glsp.Context) (response any, validMethod bool, 
 			return nil, true, true, err
 		}
 		return resp, true, true, nil
-	case methodResolveFileLegacy:
-		var params LegacyGetFileViewRequest
-		if err := json.Unmarshal(glspCtx.Params, &params); err != nil {
-			return nil, true, false, err
-		}
-		resp, err := h.ResolveFileLegacy(glspCtx, params)
-		if err != nil {
-			return nil, true, true, err
-		}
-		return resp, true, true, nil
 	}
 
 	return h.Handler.Handle(glspCtx)
@@ -99,7 +88,6 @@ func BuildHandler(logger commonlog.Logger, serverName string, indexer indexer.In
 	h.GetProgramView = s.GetProgramView
 	h.GetFileView = s.GetFileView
 	h.ResolveEntityRef = s.ResolveEntityRef
-	h.ResolveFileLegacy = s.ResolveFileLegacy
 
 	// Basic
 	h.CancelRequest = func(_ *glsp.Context, params *protocol.CancelParams) error {
