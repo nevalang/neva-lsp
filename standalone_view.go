@@ -30,8 +30,13 @@ func runStandaloneView(logger commonlog.Logger, workspacePath string, listenAddr
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/view/program", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, view.ProjectProgram(build))
+	mux.HandleFunc("/api/view/program", func(w http.ResponseWriter, req *http.Request) {
+		params := GetProgramViewRequest{
+			IncludeCurrent: queryBoolPtr(req, "includeCurrent"),
+			IncludeDeps:    queryBoolPtr(req, "includeDeps"),
+			IncludeStd:     queryBoolPtr(req, "includeStd"),
+		}
+		writeJSON(w, filterProgramModules(view.ProjectProgram(build), params))
 	})
 	mux.HandleFunc("/api/view/file", func(w http.ResponseWriter, req *http.Request) {
 		fileID := req.URL.Query().Get("id")
@@ -106,6 +111,23 @@ func writeJSON(w http.ResponseWriter, payload any) {
 	}
 }
 
+func queryBoolPtr(req *http.Request, key string) *bool {
+	raw := req.URL.Query().Get(key)
+	if raw == "" {
+		return nil
+	}
+	switch raw {
+	case "1", "true", "TRUE", "True":
+		v := true
+		return &v
+	case "0", "false", "FALSE", "False":
+		v := false
+		return &v
+	default:
+		return nil
+	}
+}
+
 func openBrowser(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -131,11 +153,18 @@ const standaloneViewHTML = `<!doctype html>
     h2,h3,h4 { margin: 8px 0; }
     button { margin: 4px 0; width: 100%; text-align: left; }
     pre { background: #f6f6f6; padding: 10px; overflow: auto; }
+    .filters { display: grid; gap: 6px; margin: 10px 0 14px; }
+    .filters label { display: flex; gap: 8px; align-items: center; }
   </style>
 </head>
 <body>
   <div id="left">
     <h2>Program Explorer</h2>
+    <div class="filters">
+      <label><input id="f-current" type="checkbox" checked /> current (@)</label>
+      <label><input id="f-deps" type="checkbox" checked /> deps</label>
+      <label><input id="f-std" type="checkbox" checked /> std</label>
+    </div>
     <div id="tree"></div>
   </div>
   <div id="right">
@@ -146,36 +175,57 @@ const standaloneViewHTML = `<!doctype html>
 (async function () {
   const details = document.getElementById('details');
   const tree = document.getElementById('tree');
-  const program = await (await fetch('/api/view/program')).json();
+  const current = document.getElementById('f-current');
+  const deps = document.getElementById('f-deps');
+  const std = document.getElementById('f-std');
 
-  for (const mod of program.modules) {
-    const modTitle = document.createElement('h3');
-    modTitle.textContent = 'Module: ' + mod.path + (mod.version ? '@' + mod.version : '');
-    tree.appendChild(modTitle);
+  async function loadProgram() {
+    const q = new URLSearchParams({
+      includeCurrent: String(current.checked),
+      includeDeps: String(deps.checked),
+      includeStd: String(std.checked),
+    });
+    const response = await fetch('/api/view/program?' + q.toString());
+    return response.json();
+  }
 
-    for (const pkg of mod.packages) {
-      const pkgTitle = document.createElement('h4');
-      pkgTitle.textContent = 'Package: ' + pkg.name;
-      tree.appendChild(pkgTitle);
+  async function renderTree() {
+    tree.innerHTML = '';
+    const program = await loadProgram();
+    for (const mod of program.modules) {
+      const modTitle = document.createElement('h3');
+      modTitle.textContent = 'Module: ' + mod.path;
+      tree.appendChild(modTitle);
 
-      for (const file of pkg.files) {
-        const btn = document.createElement('button');
-        btn.textContent = 'File ' + file.name;
-        btn.onclick = async () => {
-          const fileView = await (await fetch('/api/view/file?id=' + encodeURIComponent(file.id))).json();
-          details.innerHTML = '';
-          const title = document.createElement('h3');
-          title.textContent = fileView.name;
-          details.appendChild(title);
+      for (const pkg of mod.packages) {
+        const pkgTitle = document.createElement('h4');
+        pkgTitle.textContent = 'Package: ' + pkg.name;
+        tree.appendChild(pkgTitle);
 
-          const meta = document.createElement('pre');
-          meta.textContent = JSON.stringify(fileView, null, 2);
-          details.appendChild(meta);
-        };
-        tree.appendChild(btn);
+        for (const file of pkg.fileSummaries) {
+          const btn = document.createElement('button');
+          btn.textContent = 'File ' + file.name;
+          btn.onclick = async () => {
+            const fileView = await (await fetch('/api/view/file?id=' + encodeURIComponent(file.id))).json();
+            details.innerHTML = '';
+            const title = document.createElement('h3');
+            title.textContent = fileView.name;
+            details.appendChild(title);
+
+            const meta = document.createElement('pre');
+            meta.textContent = JSON.stringify(fileView, null, 2);
+            details.appendChild(meta);
+          };
+          tree.appendChild(btn);
+        }
       }
     }
   }
+
+  current.addEventListener('change', renderTree);
+  deps.addEventListener('change', renderTree);
+  std.addEventListener('change', renderTree);
+  await renderTree();
 })();
 </script>
 </body>
