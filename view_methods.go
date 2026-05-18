@@ -9,13 +9,14 @@ import (
 	"github.com/tliron/glsp"
 )
 
-func (s *Server) GetProgramView(_ *glsp.Context, _ GetProgramViewRequest) (any, error) {
+func (s *Server) GetProgramView(_ *glsp.Context, params GetProgramViewRequest) (any, error) {
 	build, ok := s.getBuild()
 	if !ok {
 		return nil, errors.New("program index is not ready")
 	}
 
-	return view.ProjectProgram(*build), nil
+	program := view.ProjectProgram(*build)
+	return filterProgramModules(program, params), nil
 }
 
 func (s *Server) GetFileView(_ *glsp.Context, params GetFileViewRequest) (any, error) {
@@ -140,4 +141,52 @@ func findEntityInFile(file view.File, targetEntityID string) (ResolveEntityRefRe
 	}
 
 	return ResolveEntityRefResult{}, false
+}
+
+func filterProgramModules(program view.Program, params GetProgramViewRequest) view.Program {
+	includeCurrent := boolDefault(params.IncludeCurrent, true)
+	includeDeps := boolDefault(params.IncludeDeps, true)
+	includeStd := boolDefault(params.IncludeStd, true)
+
+	if includeCurrent && includeDeps && includeStd {
+		return program
+	}
+
+	filtered := view.Program{Modules: make([]view.Module, 0, len(program.Modules))}
+	for _, module := range program.Modules {
+		switch classifyModule(module.Path) {
+		case "current":
+			if includeCurrent {
+				filtered.Modules = append(filtered.Modules, module)
+			}
+		case "std":
+			if includeStd {
+				filtered.Modules = append(filtered.Modules, module)
+			}
+		default:
+			if includeDeps {
+				filtered.Modules = append(filtered.Modules, module)
+			}
+		}
+	}
+
+	return filtered
+}
+
+func boolDefault(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func classifyModule(path string) string {
+	switch path {
+	case "@":
+		return "current"
+	case "std":
+		return "std"
+	default:
+		return "deps"
+	}
 }
