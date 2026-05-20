@@ -41,12 +41,9 @@ function handleOffsets(count: number): string[] {
   if (count <= 0) {
     return []
   }
-  if (count === 1) {
-    return ['50%']
-  }
   const offsets: string[] = []
   for (let i = 0; i < count; i++) {
-    offsets.push(`${((i + 1) * 100) / (count + 1)}%`)
+    offsets.push(`${((i + 0.5) * 100) / count}%`)
   }
   return offsets
 }
@@ -70,14 +67,20 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
   const inHandles = handleOffsets(data.inPorts?.length ?? 0)
   const outHandles = handleOffsets(data.outPorts?.length ?? 0)
   const showPortBars = Boolean(data.showMeta)
+  const hasInPorts = (data.inPorts?.length ?? 0) > 0
+  const hasOutPorts = (data.outPorts?.length ?? 0) > 0
   const hiddenHandleStyle = { opacity: 0, pointerEvents: 'none' as const }
 
   return (
-    <div className="rf-node">
-      {showPortBars && (data.inPorts?.length ?? 0) > 0 && (
+    <div className={`rf-node${showPortBars && hasInPorts ? ' rf-node-has-inbars' : ''}${showPortBars && hasOutPorts ? ' rf-node-has-outbars' : ''}`}>
+      {showPortBars && hasInPorts && (
         <div className="rf-node-port-row rf-node-port-row-top">
           {data.inPorts?.map((port, idx) => (
-            <span key={`in-pill-${port.name}`} className="rf-port-pill rf-port-pill-top" style={{ left: inHandles[idx] }}>
+            <span
+              key={`in-pill-${port.name}`}
+              className="rf-port-pill rf-port-pill-top"
+              style={{ left: inHandles[idx], width: `${100 / (data.inPorts?.length || 1)}%` }}
+            >
               <span className="rf-port-name">{port.name}</span>
               {port.type ? <span className="rf-port-type">{port.type}</span> : null}
             </span>
@@ -104,10 +107,14 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           style={showPortBars ? { ...hiddenHandleStyle, left } : { left }}
         />
       ))}
-      {showPortBars && (data.outPorts?.length ?? 0) > 0 && (
+      {showPortBars && hasOutPorts && (
         <div className="rf-node-port-row rf-node-port-row-bottom">
           {data.outPorts?.map((port, idx) => (
-            <span key={`out-pill-${port.name}`} className="rf-port-pill rf-port-pill-bottom" style={{ left: outHandles[idx] }}>
+            <span
+              key={`out-pill-${port.name}`}
+              className="rf-port-pill rf-port-pill-bottom"
+              style={{ left: outHandles[idx], width: `${100 / (data.outPorts?.length || 1)}%` }}
+            >
               <span className="rf-port-name">{port.name}</span>
               {data.showMeta && port.type ? <span className="rf-port-type">{port.type}</span> : null}
             </span>
@@ -152,21 +159,35 @@ function normalizeEdgeLabel(label: string): string {
     .trim()
 }
 
-function parsePortList(raw: string): Map<string, string> {
+function parsePortList(raw: string, knownNames: string[]): Map<string, string> {
   const result = new Map<string, string>()
+  const known = [...knownNames].sort((a, b) => b.length - a.length)
   for (const chunk of raw.split(',')) {
     const item = chunk.trim()
     if (!item) continue
-    const match = item.match(/^([A-Za-z_][A-Za-z0-9_]*)(.*)$/)
-    if (!match) continue
-    const name = match[1]
-    const type = (match[2] ?? '').trim()
+    let name = ''
+    for (const candidate of known) {
+      if (item.startsWith(candidate)) {
+        name = candidate
+        break
+      }
+    }
+    if (!name) {
+      const fallback = item.match(/^([A-Za-z_][A-Za-z0-9_]*)(.*)$/)
+      if (!fallback) continue
+      name = fallback[1]
+    }
+    const type = item.slice(name.length).trim()
     result.set(name, type)
   }
   return result
 }
 
-function parseSignaturePorts(signatureText: string | undefined): { in: Map<string, string>; out: Map<string, string> } {
+function parseSignaturePorts(
+  signatureText: string | undefined,
+  knownInNames: string[],
+  knownOutNames: string[],
+): { in: Map<string, string>; out: Map<string, string> } {
   if (!signatureText) {
     return { in: new Map<string, string>(), out: new Map<string, string>() }
   }
@@ -176,8 +197,8 @@ function parseSignaturePorts(signatureText: string | undefined): { in: Map<strin
     return { in: new Map<string, string>(), out: new Map<string, string>() }
   }
   return {
-    in: parsePortList(pair[1] ?? ''),
-    out: parsePortList(pair[2] ?? ''),
+    in: parsePortList(pair[1] ?? '', knownInNames),
+    out: parsePortList(pair[2] ?? '', knownOutNames),
   }
 }
 
@@ -232,26 +253,35 @@ function interfaceOverviewNode(iface: Interface): Node<NodeData> {
 function componentDetailNodes(component: Component, showMeta: boolean): Node<NodeData>[] {
   const result: Node<NodeData>[] = []
   const nodePortKinds = new Map<string, { in: Map<string, string>; out: Map<string, string> }>()
-  const signaturePortsByNode = new Map<string, { in: Map<string, string>; out: Map<string, string> }>()
-
-  for (const node of component.nodes) {
-    signaturePortsByNode.set(node.name, parseSignaturePorts(node.resolvedRef?.anchor?.text))
-  }
 
   for (const connection of component.connections) {
     if (connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out') {
       const item = nodePortKinds.get(connection.sender.node) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
       const portName = connection.sender.port || 'sig'
-      const signatureType = signaturePortsByNode.get(connection.sender.node)?.out.get(portName) ?? ''
-      item.out.set(portName, signatureType)
+      item.out.set(portName, '')
       nodePortKinds.set(connection.sender.node, item)
     }
     if (connection.receiver?.node && connection.receiver.node !== 'in' && connection.receiver.node !== 'out') {
       const item = nodePortKinds.get(connection.receiver.node) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
       const portName = connection.receiver.port || 'sig'
-      const signatureType = signaturePortsByNode.get(connection.receiver.node)?.in.get(portName) ?? ''
-      item.in.set(portName, signatureType)
+      item.in.set(portName, '')
       nodePortKinds.set(connection.receiver.node, item)
+    }
+  }
+
+  for (const node of component.nodes) {
+    const ports = nodePortKinds.get(node.name)
+    if (!ports) continue
+    const parsed = parseSignaturePorts(
+      node.resolvedRef?.anchor?.text,
+      Array.from(ports.in.keys()),
+      Array.from(ports.out.keys()),
+    )
+    for (const [name, t] of parsed.in.entries()) {
+      if (ports.in.has(name)) ports.in.set(name, t)
+    }
+    for (const [name, t] of parsed.out.entries()) {
+      if (ports.out.has(name)) ports.out.set(name, t)
     }
   }
 
