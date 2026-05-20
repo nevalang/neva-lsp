@@ -212,11 +212,11 @@ button.active {
 }
 
 .rf-node-port-row-top {
-  top: -34px;
+  top: 0;
 }
 
 .rf-node-port-row-bottom {
-  bottom: -34px;
+  bottom: 0;
 }
 
 .rf-port-pill {
@@ -225,19 +225,21 @@ button.active {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #9ca3af;
   background: #ffffff;
-  border-radius: 999px;
-  padding: 2px 8px;
+  border-radius: 6px;
+  padding: 6px 10px;
   white-space: nowrap;
 }
 
 .rf-port-pill-top {
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.05);
+  transform: translate(-50%, -100%);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 
 .rf-port-pill-bottom {
-  box-shadow: 0 -1px 0 rgba(15, 23, 42, 0.05);
+  transform: translateX(-50%);
+  box-shadow: 0 -1px 0 rgba(15, 23, 42, 0.04);
 }
 
 .rf-port-name {

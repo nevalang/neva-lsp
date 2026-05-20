@@ -51,6 +51,10 @@ function handleOffsets(count: number): string[] {
   return offsets
 }
 
+function handleIDForPort(portName: string): string {
+  return `port:${portName}`
+}
+
 function EntityNode({ data }: NodeProps<Node<NodeData>>) {
   if (data.kind === 'port') {
     return (
@@ -65,10 +69,12 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
 
   const inHandles = handleOffsets(data.inPorts?.length ?? 0)
   const outHandles = handleOffsets(data.outPorts?.length ?? 0)
+  const showPortBars = Boolean(data.showMeta)
+  const hiddenHandleStyle = { opacity: 0, pointerEvents: 'none' as const }
 
   return (
     <div className="rf-node">
-      {(data.inPorts?.length ?? 0) > 0 && (
+      {showPortBars && (data.inPorts?.length ?? 0) > 0 && (
         <div className="rf-node-port-row rf-node-port-row-top">
           {data.inPorts?.map((port, idx) => (
             <span key={`in-pill-${port.name}`} className="rf-port-pill rf-port-pill-top" style={{ left: inHandles[idx] }}>
@@ -79,14 +85,26 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
         </div>
       )}
       {inHandles.map((left, idx) => (
-        <Handle key={`en-in-${idx}`} type="target" position={Position.Top} style={{ left }} />
+        <Handle
+          key={`en-in-${idx}`}
+          id={handleIDForPort(data.inPorts?.[idx]?.name ?? `in-${idx}`)}
+          type="target"
+          position={Position.Top}
+          style={showPortBars ? { ...hiddenHandleStyle, left } : { left }}
+        />
       ))}
       <div className="rf-node-title">{data.label}</div>
       {data.showMeta && data.subtitle && <div className="rf-node-subtitle">{data.subtitle}</div>}
       {outHandles.map((left, idx) => (
-        <Handle key={`en-out-${idx}`} type="source" position={Position.Bottom} style={{ left }} />
+        <Handle
+          key={`en-out-${idx}`}
+          id={handleIDForPort(data.outPorts?.[idx]?.name ?? `out-${idx}`)}
+          type="source"
+          position={Position.Bottom}
+          style={showPortBars ? { ...hiddenHandleStyle, left } : { left }}
+        />
       ))}
-      {(data.outPorts?.length ?? 0) > 0 && (
+      {showPortBars && (data.outPorts?.length ?? 0) > 0 && (
         <div className="rf-node-port-row rf-node-port-row-bottom">
           {data.outPorts?.map((port, idx) => (
             <span key={`out-pill-${port.name}`} className="rf-port-pill rf-port-pill-bottom" style={{ left: outHandles[idx] }}>
@@ -184,6 +202,20 @@ function interfaceOverviewNode(iface: Interface): Node<NodeData> {
 
 function componentDetailNodes(component: Component, showMeta: boolean): Node<NodeData>[] {
   const result: Node<NodeData>[] = []
+  const nodePortKinds = new Map<string, { in: Set<string>; out: Set<string> }>()
+
+  for (const connection of component.connections) {
+    if (connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out') {
+      const item = nodePortKinds.get(connection.sender.node) ?? { in: new Set<string>(), out: new Set<string>() }
+      item.out.add(connection.sender.port || 'sig')
+      nodePortKinds.set(connection.sender.node, item)
+    }
+    if (connection.receiver?.node && connection.receiver.node !== 'in' && connection.receiver.node !== 'out') {
+      const item = nodePortKinds.get(connection.receiver.node) ?? { in: new Set<string>(), out: new Set<string>() }
+      item.in.add(connection.receiver.port || 'sig')
+      nodePortKinds.set(connection.receiver.node, item)
+    }
+  }
 
   for (const port of component.inPorts) {
     result.push({
@@ -215,6 +247,8 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
         label: node.name,
         subtitle: sourceLikeRef,
         showMeta,
+        inPorts: Array.from(nodePortKinds.get(node.name)?.in ?? []).map((name) => ({ name, type: '' })),
+        outPorts: Array.from(nodePortKinds.get(node.name)?.out ?? []).map((name) => ({ name, type: '' })),
         fileId: ref?.fileId,
         entityId: ref?.entityId,
       },
@@ -249,6 +283,12 @@ function componentDetailEdges(component: Component): Edge[] {
       id: connection.id,
       source,
       target,
+      sourceHandle: connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out'
+        ? handleIDForPort(connection.sender.port || 'sig')
+        : undefined,
+      targetHandle: connection.receiver?.node && connection.receiver.node !== 'in' && connection.receiver.node !== 'out'
+        ? handleIDForPort(connection.receiver.port || 'sig')
+        : undefined,
       label: normalizeEdgeLabel(`${formatEndpointLabel(connection.sender)} -> ${formatEndpointLabel(connection.receiver)}`),
     })
   }
