@@ -18,6 +18,7 @@ type Handler struct {
 	GetProgramView   func(glspCtx *glsp.Context, params GetProgramViewRequest) (any, error)
 	GetFileView      func(glspCtx *glsp.Context, params GetFileViewRequest) (any, error)
 	ResolveEntityRef func(glspCtx *glsp.Context, params ResolveEntityRefRequest) (any, error)
+	SearchEntities   func(glspCtx *glsp.Context, params SearchEntitiesRequest) (any, error)
 }
 
 func (h Handler) Handle(glspCtx *glsp.Context) (response any, validMethod bool, validParams bool, err error) {
@@ -58,6 +59,18 @@ func (h Handler) Handle(glspCtx *glsp.Context) (response any, validMethod bool, 
 			return nil, true, true, err
 		}
 		return resp, true, true, nil
+	case methodSearchEntities:
+		var params SearchEntitiesRequest
+		if len(glspCtx.Params) != 0 {
+			if err := json.Unmarshal(glspCtx.Params, &params); err != nil {
+				return nil, true, false, err
+			}
+		}
+		resp, err := h.SearchEntities(glspCtx, params)
+		if err != nil {
+			return nil, true, true, err
+		}
+		return resp, true, true, nil
 	}
 
 	return h.Handler.Handle(glspCtx)
@@ -88,6 +101,7 @@ func BuildHandler(logger commonlog.Logger, serverName string, indexer indexer.In
 	h.GetProgramView = s.GetProgramView
 	h.GetFileView = s.GetFileView
 	h.ResolveEntityRef = s.ResolveEntityRef
+	h.SearchEntities = s.SearchEntities
 
 	// Basic
 	h.CancelRequest = func(_ *glsp.Context, params *protocol.CancelParams) error {

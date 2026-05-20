@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	src "github.com/nevalang/neva/pkg/ast"
 	"github.com/nevalang/neva/pkg/view"
@@ -62,6 +63,60 @@ func (s *Server) ResolveEntityRef(_ *glsp.Context, params ResolveEntityRefReques
 		return nil, fmt.Errorf("entity not found: %s", params.TargetEntityID)
 	}
 	return result, nil
+}
+
+func (s *Server) SearchEntities(_ *glsp.Context, params SearchEntitiesRequest) (any, error) {
+	build, ok := s.getBuild()
+	if !ok {
+		return nil, errors.New("program index is not ready")
+	}
+
+	query := strings.TrimSpace(strings.ToLower(params.Query))
+	if query == "" {
+		return []SearchEntitiesResultItem{}, nil
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	allowedKinds := map[string]struct{}{}
+	for _, kind := range params.Kinds {
+		allowedKinds[strings.ToLower(strings.TrimSpace(kind))] = struct{}{}
+	}
+
+	moduleFilters := normalizeFilters(params.ModuleFilters, params.ModuleFilter)
+	packageFilters := normalizeFilters(params.PackageFilters, params.PackageFilter)
+
+	program := view.ProjectProgram(*build)
+	results := make([]SearchEntitiesResultItem, 0, limit)
+
+	for _, module := range program.Modules {
+		if len(moduleFilters) > 0 && !isInSet(moduleFilters, module.Path) {
+			continue
+		}
+		for _, pkg := range module.Packages {
+			qualifiedPackage := module.Path + "/" + pkg.Name
+			if len(packageFilters) > 0 && !isInSet(packageFilters, qualifiedPackage) {
+				continue
+			}
+			for _, fileSummary := range pkg.FileSummaries {
+				if len(results) >= limit {
+					return results, nil
+				}
+				fileView, found := view.ProjectFileByID(*build, fileSummary.ID)
+				if !found {
+					continue
+				}
+				appendEntityMatches(&results, fileView, module.Path, pkg.Name, query, allowedKinds, limit)
+				if len(results) >= limit {
+					return results, nil
+				}
+			}
+		}
+	}
+
+	return results, nil
 }
 
 // ResolveFileLegacy is retained only as migration reference.
@@ -141,6 +196,79 @@ func findEntityInFile(file view.File, targetEntityID string) (ResolveEntityRefRe
 	}
 
 	return ResolveEntityRefResult{}, false
+}
+
+func appendEntityMatches(
+	results *[]SearchEntitiesResultItem,
+	file view.File,
+	modulePath string,
+	packageName string,
+	query string,
+	allowedKinds map[string]struct{},
+	limit int,
+) {
+	appendMatch := func(kind string, name string, id string, anchor view.SourceAnchor) {
+		if len(*results) >= limit || !containsFold(name, query) {
+			return
+		}
+		if !kindAllowed(allowedKinds, kind) {
+			return
+		}
+		*results = append(*results, SearchEntitiesResultItem{
+			Label:    name,
+			Kind:     kind,
+			Module:   modulePath,
+			Package:  packageName,
+			FileID:   file.ID,
+			EntityID: id,
+			Anchor:   anchor,
+		})
+	}
+
+	for _, entity := range file.Components {
+		appendMatch("component", entity.Name, entity.ID, entity.Anchor)
+	}
+	for _, entity := range file.Interfaces {
+		appendMatch("interface", entity.Name, entity.ID, entity.Anchor)
+	}
+	for _, entity := range file.Types {
+		appendMatch("type", entity.Name, entity.ID, entity.Anchor)
+	}
+	for _, entity := range file.Consts {
+		appendMatch("const", entity.Name, entity.ID, entity.Anchor)
+	}
+}
+
+func kindAllowed(allowedKinds map[string]struct{}, kind string) bool {
+	if len(allowedKinds) == 0 {
+		return true
+	}
+	_, ok := allowedKinds[kind]
+	return ok
+}
+
+func containsFold(s string, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
+}
+
+func normalizeFilters(filters []string, legacy string) map[string]struct{} {
+	result := map[string]struct{}{}
+	for _, item := range filters {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result[item] = struct{}{}
+		}
+	}
+	legacy = strings.TrimSpace(legacy)
+	if legacy != "" {
+		result[legacy] = struct{}{}
+	}
+	return result
+}
+
+func isInSet(set map[string]struct{}, value string) bool {
+	_, ok := set[value]
+	return ok
 }
 
 func filterProgramModules(program view.Program, params GetProgramViewRequest) view.Program {

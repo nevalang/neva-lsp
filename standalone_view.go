@@ -6,13 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	ast "github.com/nevalang/neva/pkg/ast"
 	"github.com/nevalang/neva/pkg/indexer"
 	"github.com/nevalang/neva/pkg/view"
 	"github.com/tliron/commonlog"
+	"gopkg.in/yaml.v3"
 )
 
 func runStandaloneView(logger commonlog.Logger, workspacePath string, listenAddr string, openBrowserFlag bool) error {
@@ -29,48 +33,8 @@ func runStandaloneView(logger commonlog.Logger, workspacePath string, listenAddr
 		return errors.New("no Neva module found in workspace")
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/view/program", func(w http.ResponseWriter, req *http.Request) {
-		params := GetProgramViewRequest{
-			IncludeCurrent: queryBoolPtr(req, "includeCurrent"),
-			IncludeDeps:    queryBoolPtr(req, "includeDeps"),
-			IncludeStd:     queryBoolPtr(req, "includeStd"),
-		}
-		writeJSON(w, filterProgramModules(view.ProjectProgram(build), params))
-	})
-	mux.HandleFunc("/api/view/file", func(w http.ResponseWriter, req *http.Request) {
-		fileID := req.URL.Query().Get("id")
-		if fileID == "" {
-			http.Error(w, "missing id", http.StatusBadRequest)
-			return
-		}
-		fileView, ok := view.ProjectFileByID(build, fileID)
-		if !ok {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
-		writeJSON(w, fileView)
-	})
-	mux.HandleFunc("/api/view/resolve", func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload ResolveEntityRefRequest
-		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
-			http.Error(w, "invalid request", http.StatusBadRequest)
-			return
-		}
-		result, err := resolveEntityRefInBuild(&build, payload)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		writeJSON(w, result)
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(standaloneViewHTML))
-	})
+	manifestCurrent := readManifestView(workspacePath)
+	mux := buildStandaloneMux(workspacePath, &build, manifestCurrent)
 
 	url := "http://" + listenAddr
 	logger.Info("standalone visual view running", "url", url)
@@ -82,6 +46,131 @@ func runStandaloneView(logger commonlog.Logger, workspacePath string, listenAddr
 	return server.ListenAndServe()
 }
 
+func buildStandaloneMux(workspacePath string, build *ast.Build, manifestCurrent manifestView) *http.ServeMux {
+	mux := http.NewServeMux()
+	registerViewAPI(mux, build, manifestCurrent)
+	registerStaticUI(mux)
+	return mux
+}
+
+func registerViewAPI(mux *http.ServeMux, build *ast.Build, manifestCurrent manifestView) {
+	mux.HandleFunc("/api/view/program", func(w http.ResponseWriter, req *http.Request) {
+		params := GetProgramViewRequest{
+			IncludeCurrent: queryBoolPtr(req, "includeCurrent"),
+			IncludeDeps:    queryBoolPtr(req, "includeDeps"),
+			IncludeStd:     queryBoolPtr(req, "includeStd"),
+		}
+		writeJSON(w, filterProgramModules(view.ProjectProgram(*build), params))
+	})
+
+	mux.HandleFunc("/api/view/file", func(w http.ResponseWriter, req *http.Request) {
+		fileID := req.URL.Query().Get("id")
+		if fileID == "" {
+			http.Error(w, "missing id", http.StatusBadRequest)
+			return
+		}
+		fileView, ok := view.ProjectFileByID(*build, fileID)
+		if !ok {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, fileView)
+	})
+
+	mux.HandleFunc("/api/view/search", func(w http.ResponseWriter, req *http.Request) {
+		q := strings.TrimSpace(req.URL.Query().Get("q"))
+		kinds := req.URL.Query()["kind"]
+		modules := req.URL.Query()["module"]
+		packages := req.URL.Query()["package"]
+		resultAny, err := searchEntitiesInBuild(build, SearchEntitiesRequest{
+			Query:          q,
+			Kinds:          kinds,
+			ModuleFilters:  modules,
+			PackageFilters: packages,
+			Limit:          100,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, resultAny)
+	})
+
+	mux.HandleFunc("/api/view/manifest", func(w http.ResponseWriter, req *http.Request) {
+		modulePath := strings.TrimSpace(req.URL.Query().Get("module"))
+		switch modulePath {
+		case "", "@":
+			writeJSON(w, manifestCurrent)
+		case "std":
+			writeJSON(w, manifestView{Path: "std/neva.yml", Present: false, Deps: map[string]string{}})
+		default:
+			writeJSON(w, manifestView{Path: modulePath + "/neva.yml", Present: false, Deps: map[string]string{}})
+		}
+	})
+
+	mux.HandleFunc("/api/view/resolve", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var payload ResolveEntityRefRequest
+		if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		result, err := resolveEntityRefInBuild(build, payload)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, result)
+	})
+}
+
+func registerStaticUI(mux *http.ServeMux) {
+	distDir := resolveWebDistDir()
+	fileServer := http.FileServer(http.Dir(distDir))
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/" {
+			assetRelPath := strings.TrimPrefix(filepath.Clean(req.URL.Path), string(filepath.Separator))
+			assetPath := filepath.Join(distDir, assetRelPath)
+			if _, err := os.Stat(assetPath); err == nil {
+				fileServer.ServeHTTP(w, req)
+				return
+			}
+		}
+
+		indexPath := filepath.Join(distDir, "index.html")
+		if _, err := os.Stat(indexPath); err != nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("Standalone UI is not built yet. Build /web/dist (or set NEVA_LSP_WEB_DIST)."))
+			return
+		}
+		http.ServeFile(w, req, indexPath)
+	})
+}
+
+func resolveWebDistDir() string {
+	if override := strings.TrimSpace(os.Getenv("NEVA_LSP_WEB_DIST")); override != "" {
+		return override
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		if stat, statErr := os.Stat(filepath.Join(cwd, "web", "dist", "index.html")); statErr == nil && !stat.IsDir() {
+			return filepath.Join(cwd, "web", "dist")
+		}
+	}
+
+	if executablePath, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executablePath)
+		return filepath.Join(executableDir, "web", "dist")
+	}
+
+	return filepath.Join("web", "dist")
+}
+
 func resolveEntityRefInBuild(build *ast.Build, params ResolveEntityRefRequest) (ResolveEntityRefResult, error) {
 	if params.TargetFileID == "" {
 		return ResolveEntityRefResult{}, errors.New("targetFileId is required")
@@ -90,8 +179,6 @@ func resolveEntityRefInBuild(build *ast.Build, params ResolveEntityRefRequest) (
 		return ResolveEntityRefResult{}, errors.New("targetEntityId is required")
 	}
 
-	// Standalone view mirrors LSP behavior: IDs are canonicalized in pkg/view
-	// projection, then resolved by deterministic lookup.
 	fileView, found := view.ProjectFileByID(*build, params.TargetFileID)
 	if !found {
 		return ResolveEntityRefResult{}, fmt.Errorf("file not found: %s", params.TargetFileID)
@@ -102,6 +189,102 @@ func resolveEntityRefInBuild(build *ast.Build, params ResolveEntityRefRequest) (
 		return ResolveEntityRefResult{}, fmt.Errorf("entity not found: %s", params.TargetEntityID)
 	}
 	return result, nil
+}
+
+func searchEntitiesInBuild(build *ast.Build, params SearchEntitiesRequest) ([]SearchEntitiesResultItem, error) {
+	query := strings.TrimSpace(params.Query)
+	if query == "" {
+		return []SearchEntitiesResultItem{}, nil
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	allowedKinds := map[string]struct{}{}
+	for _, kind := range params.Kinds {
+		kind = strings.ToLower(strings.TrimSpace(kind))
+		if kind != "" {
+			allowedKinds[kind] = struct{}{}
+		}
+	}
+
+	moduleFilters := normalizeFilters(params.ModuleFilters, params.ModuleFilter)
+	packageFilters := normalizeFilters(params.PackageFilters, params.PackageFilter)
+
+	program := view.ProjectProgram(*build)
+	results := make([]SearchEntitiesResultItem, 0, limit)
+
+	for _, module := range program.Modules {
+		if len(moduleFilters) > 0 && !isInSet(moduleFilters, module.Path) {
+			continue
+		}
+		for _, pkg := range module.Packages {
+			qualifiedPackage := module.Path + "/" + pkg.Name
+			if len(packageFilters) > 0 && !isInSet(packageFilters, qualifiedPackage) {
+				continue
+			}
+			for _, fileSummary := range pkg.FileSummaries {
+				if len(results) >= limit {
+					return results, nil
+				}
+				fileView, found := view.ProjectFileByID(*build, fileSummary.ID)
+				if !found {
+					continue
+				}
+				appendEntityMatches(&results, fileView, module.Path, pkg.Name, strings.ToLower(query), allowedKinds, limit)
+				if len(results) >= limit {
+					return results, nil
+				}
+			}
+		}
+	}
+
+	return results, nil
+}
+
+type manifestView struct {
+	Path    string            `json:"path"`
+	Raw     string            `json:"raw"`
+	Deps    map[string]string `json:"deps"`
+	Present bool              `json:"present"`
+}
+
+func readManifestView(workspacePath string) manifestView {
+	candidates := []string{
+		filepath.Join(workspacePath, "neva.yml"),
+		filepath.Join(workspacePath, "neva.yaml"),
+	}
+	for _, path := range candidates {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		raw := string(content)
+		return manifestView{
+			Path:    path,
+			Raw:     raw,
+			Deps:    parseManifestDeps(raw),
+			Present: true,
+		}
+	}
+	return manifestView{Present: false, Deps: map[string]string{}}
+}
+
+func parseManifestDeps(raw string) map[string]string {
+	type manifest struct {
+		Deps map[string]string `yaml:"deps"`
+	}
+	var m manifest
+	_ = yamlUnmarshal([]byte(raw), &m)
+	if m.Deps == nil {
+		return map[string]string{}
+	}
+	return m.Deps
+}
+
+var yamlUnmarshal = func(data []byte, v any) error {
+	return yaml.Unmarshal(data, v)
 }
 
 func writeJSON(w http.ResponseWriter, payload any) {
@@ -140,93 +323,3 @@ func openBrowser(url string) error {
 	}
 	return cmd.Start()
 }
-
-const standaloneViewHTML = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Neva View (Read-only)</title>
-  <style>
-    body { font-family: sans-serif; margin: 0; display: grid; grid-template-columns: 420px 1fr; height: 100vh; }
-    #left { border-right: 1px solid #ddd; overflow: auto; padding: 12px; }
-    #right { overflow: auto; padding: 12px; }
-    h2,h3,h4 { margin: 8px 0; }
-    button { margin: 4px 0; width: 100%; text-align: left; }
-    pre { background: #f6f6f6; padding: 10px; overflow: auto; }
-    .filters { display: grid; gap: 6px; margin: 10px 0 14px; }
-    .filters label { display: flex; gap: 8px; align-items: center; }
-  </style>
-</head>
-<body>
-  <div id="left">
-    <h2>Program Explorer</h2>
-    <div class="filters">
-      <label><input id="f-current" type="checkbox" checked /> current (@)</label>
-      <label><input id="f-deps" type="checkbox" checked /> deps</label>
-      <label><input id="f-std" type="checkbox" checked /> std</label>
-    </div>
-    <div id="tree"></div>
-  </div>
-  <div id="right">
-    <h2>Details</h2>
-    <div id="details">Select a file or entity.</div>
-  </div>
-<script>
-(async function () {
-  const details = document.getElementById('details');
-  const tree = document.getElementById('tree');
-  const current = document.getElementById('f-current');
-  const deps = document.getElementById('f-deps');
-  const std = document.getElementById('f-std');
-
-  async function loadProgram() {
-    const q = new URLSearchParams({
-      includeCurrent: String(current.checked),
-      includeDeps: String(deps.checked),
-      includeStd: String(std.checked),
-    });
-    const response = await fetch('/api/view/program?' + q.toString());
-    return response.json();
-  }
-
-  async function renderTree() {
-    tree.innerHTML = '';
-    const program = await loadProgram();
-    for (const mod of program.modules) {
-      const modTitle = document.createElement('h3');
-      modTitle.textContent = 'Module: ' + mod.path;
-      tree.appendChild(modTitle);
-
-      for (const pkg of mod.packages) {
-        const pkgTitle = document.createElement('h4');
-        pkgTitle.textContent = 'Package: ' + pkg.name;
-        tree.appendChild(pkgTitle);
-
-        for (const file of pkg.fileSummaries) {
-          const btn = document.createElement('button');
-          btn.textContent = 'File ' + file.name;
-          btn.onclick = async () => {
-            const fileView = await (await fetch('/api/view/file?id=' + encodeURIComponent(file.id))).json();
-            details.innerHTML = '';
-            const title = document.createElement('h3');
-            title.textContent = fileView.name;
-            details.appendChild(title);
-
-            const meta = document.createElement('pre');
-            meta.textContent = JSON.stringify(fileView, null, 2);
-            details.appendChild(meta);
-          };
-          tree.appendChild(btn);
-        }
-      }
-    }
-  }
-
-  current.addEventListener('change', renderTree);
-  deps.addEventListener('change', renderTree);
-  std.addEventListener('change', renderTree);
-  await renderTree();
-})();
-</script>
-</body>
-</html>`

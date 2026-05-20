@@ -342,6 +342,70 @@ def Echo(data any) (res any) {
 	}
 }
 
+func TestViewAPI_SearchEntities_WithFilters(t *testing.T) {
+	t.Parallel()
+
+	mainFile := `
+import {
+	runtime
+}
+
+const Greeting string = 'Hello'
+type LocalType string
+interface LocalIface(data any) (res any)
+
+def Main(start any) (stop any) {
+	echo Echo
+	---
+	:start -> echo:data
+	echo:res -> :stop
+}
+
+def Echo(data any) (res any) {
+	:data -> :res
+}
+`
+
+	server, _, _ := buildIndexedServerWithSingleMainFile(t, mainFile)
+
+	itemsAny, err := server.SearchEntities(nil, SearchEntitiesRequest{
+		Query: "main",
+		Kinds: []string{"component"},
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("SearchEntities(component main) error = %v", err)
+	}
+	items, ok := itemsAny.([]SearchEntitiesResultItem)
+	if !ok {
+		t.Fatalf("SearchEntities type = %T, want []SearchEntitiesResultItem", itemsAny)
+	}
+	if len(items) == 0 {
+		t.Fatal("SearchEntities(component main) returned no results")
+	}
+	for _, item := range items {
+		if item.Kind != "component" {
+			t.Fatalf("SearchEntities(component main) returned kind %q", item.Kind)
+		}
+		if item.FileID == "" || item.EntityID == "" {
+			t.Fatalf("SearchEntities(component main) returned incomplete item: %#v", item)
+		}
+	}
+
+	localTypeAny, err := server.SearchEntities(nil, SearchEntitiesRequest{
+		Query:        "local",
+		Kinds:        []string{"type"},
+		ModuleFilter: "@",
+	})
+	if err != nil {
+		t.Fatalf("SearchEntities(local type) error = %v", err)
+	}
+	localTypes := localTypeAny.([]SearchEntitiesResultItem)
+	if len(localTypes) != 1 || localTypes[0].Kind != "type" || localTypes[0].Label != "LocalType" {
+		t.Fatalf("SearchEntities(local type) unexpected result: %#v", localTypes)
+	}
+}
+
 func findComponentByName(file view.File, name string) *view.Component {
 	for idx := range file.Components {
 		if file.Components[idx].Name == name {

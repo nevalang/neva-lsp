@@ -1,7 +1,10 @@
 package main
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -42,5 +45,85 @@ func TestQueryBoolPtr(t *testing.T) {
 				t.Fatalf("queryBoolPtr()=%v, want %v", *got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseManifestDeps(t *testing.T) {
+	t.Parallel()
+
+	raw := `
+version: "0.37.1"
+deps:
+  std: "0.37.1"
+  github.com/example/mod: "1.2.3"
+`
+
+	deps := parseManifestDeps(raw)
+	if len(deps) != 2 {
+		t.Fatalf("parseManifestDeps() len=%d, want 2", len(deps))
+	}
+	if deps["std"] != "0.37.1" {
+		t.Fatalf("parseManifestDeps() std=%q, want 0.37.1", deps["std"])
+	}
+	if deps["github.com/example/mod"] != "1.2.3" {
+		t.Fatalf("parseManifestDeps() github.com/example/mod=%q, want 1.2.3", deps["github.com/example/mod"])
+	}
+}
+
+func TestRegisterStaticUI_MissingDist_ReturnsInstruction(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("NEVA_LSP_WEB_DIST", filepath.Join(workspace, "web", "dist"))
+	mux := http.NewServeMux()
+	registerStaticUI(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if body := rec.Body.String(); body == "" {
+		t.Fatal("expected non-empty fallback message")
+	}
+}
+
+func TestRegisterStaticUI_ServesIndexAndAssets(t *testing.T) {
+	workspace := t.TempDir()
+	distDir := filepath.Join(workspace, "web", "dist")
+	if err := os.MkdirAll(distDir, 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("<html>ok</html>"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "asset.txt"), []byte("asset"), 0o644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	t.Setenv("NEVA_LSP_WEB_DIST", distDir)
+
+	mux := http.NewServeMux()
+	registerStaticUI(mux)
+
+	recIndex := httptest.NewRecorder()
+	mux.ServeHTTP(recIndex, httptest.NewRequest(http.MethodGet, "/", nil))
+	if recIndex.Code != http.StatusOK {
+		t.Fatalf("index status=%d, want 200", recIndex.Code)
+	}
+
+	recAsset := httptest.NewRecorder()
+	mux.ServeHTTP(recAsset, httptest.NewRequest(http.MethodGet, "/asset.txt", nil))
+	if recAsset.Code != http.StatusOK {
+		t.Fatalf("asset status=%d, want 200", recAsset.Code)
+	}
+	if got := recAsset.Body.String(); got != "asset" {
+		t.Fatalf("asset body=%q, want asset", got)
+	}
+}
+
+func TestResolveWebDistDir_UsesExecutableRelativeFallback(t *testing.T) {
+	t.Setenv("NEVA_LSP_WEB_DIST", "")
+	if got := resolveWebDistDir(); got == "" {
+		t.Fatal("resolveWebDistDir() returned empty path")
 	}
 }
