@@ -152,6 +152,35 @@ function normalizeEdgeLabel(label: string): string {
     .trim()
 }
 
+function parsePortList(raw: string): Map<string, string> {
+  const result = new Map<string, string>()
+  for (const chunk of raw.split(',')) {
+    const item = chunk.trim()
+    if (!item) continue
+    const match = item.match(/^([A-Za-z_][A-Za-z0-9_]*)(.*)$/)
+    if (!match) continue
+    const name = match[1]
+    const type = (match[2] ?? '').trim()
+    result.set(name, type)
+  }
+  return result
+}
+
+function parseSignaturePorts(signatureText: string | undefined): { in: Map<string, string>; out: Map<string, string> } {
+  if (!signatureText) {
+    return { in: new Map<string, string>(), out: new Map<string, string>() }
+  }
+  const normalized = signatureText.replace(/\s+/g, '')
+  const pair = normalized.match(/\(([^()]*)\)\(([^()]*)\)/)
+  if (!pair) {
+    return { in: new Map<string, string>(), out: new Map<string, string>() }
+  }
+  return {
+    in: parsePortList(pair[1] ?? ''),
+    out: parsePortList(pair[2] ?? ''),
+  }
+}
+
 function resolveNodeID(component: Component, endpoint: { node?: string; port?: string }): string | null {
   if (!endpoint.node) {
     return null
@@ -202,17 +231,26 @@ function interfaceOverviewNode(iface: Interface): Node<NodeData> {
 
 function componentDetailNodes(component: Component, showMeta: boolean): Node<NodeData>[] {
   const result: Node<NodeData>[] = []
-  const nodePortKinds = new Map<string, { in: Set<string>; out: Set<string> }>()
+  const nodePortKinds = new Map<string, { in: Map<string, string>; out: Map<string, string> }>()
+  const signaturePortsByNode = new Map<string, { in: Map<string, string>; out: Map<string, string> }>()
+
+  for (const node of component.nodes) {
+    signaturePortsByNode.set(node.name, parseSignaturePorts(node.resolvedRef?.anchor?.text))
+  }
 
   for (const connection of component.connections) {
     if (connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out') {
-      const item = nodePortKinds.get(connection.sender.node) ?? { in: new Set<string>(), out: new Set<string>() }
-      item.out.add(connection.sender.port || 'sig')
+      const item = nodePortKinds.get(connection.sender.node) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
+      const portName = connection.sender.port || 'sig'
+      const signatureType = signaturePortsByNode.get(connection.sender.node)?.out.get(portName) ?? ''
+      item.out.set(portName, signatureType)
       nodePortKinds.set(connection.sender.node, item)
     }
     if (connection.receiver?.node && connection.receiver.node !== 'in' && connection.receiver.node !== 'out') {
-      const item = nodePortKinds.get(connection.receiver.node) ?? { in: new Set<string>(), out: new Set<string>() }
-      item.in.add(connection.receiver.port || 'sig')
+      const item = nodePortKinds.get(connection.receiver.node) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
+      const portName = connection.receiver.port || 'sig'
+      const signatureType = signaturePortsByNode.get(connection.receiver.node)?.in.get(portName) ?? ''
+      item.in.set(portName, signatureType)
       nodePortKinds.set(connection.receiver.node, item)
     }
   }
@@ -247,8 +285,8 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
         label: node.name,
         subtitle: sourceLikeRef,
         showMeta,
-        inPorts: Array.from(nodePortKinds.get(node.name)?.in ?? []).map((name) => ({ name, type: '' })),
-        outPorts: Array.from(nodePortKinds.get(node.name)?.out ?? []).map((name) => ({ name, type: '' })),
+        inPorts: Array.from(nodePortKinds.get(node.name)?.in.entries() ?? []).map(([name, type]) => ({ name, type })),
+        outPorts: Array.from(nodePortKinds.get(node.name)?.out.entries() ?? []).map(([name, type]) => ({ name, type })),
         fileId: ref?.fileId,
         entityId: ref?.entityId,
       },
