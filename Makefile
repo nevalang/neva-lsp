@@ -1,14 +1,11 @@
-.PHONY: build test web
+.PHONY: install test
+# .PHONY: install test web
 
-PORT ?= 7792
-WORKDIR ?= ../neva/e2e/echo_verbose
-BIN ?= neva-lsp
-
-build:
-	go build -o $(BIN) .
+install:
+	go install .
 
 test:
 	go test ./...
 
-web: build
-	cd $(WORKDIR) && ../neva-lsp/$(BIN) -view -view-port $(PORT)
+# web: install
+# 	neva-lsp --view --view-port=7792
