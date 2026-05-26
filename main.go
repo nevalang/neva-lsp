@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/nevalang/neva/pkg/indexer"
 	"github.com/tliron/commonlog"
@@ -18,6 +20,7 @@ func main() {
 	standaloneView := flag.Bool("view", false, "-view")
 	viewPort := flag.Int("view-port", defaultStandalonePort, "-view-port")
 	viewOpen := flag.Bool("view-open", false, "-view-open")
+	viewWorkspace := flag.String("view-workspace", ".", "-view-workspace")
 	flag.Parse()
 
 	loglvl := 1
@@ -29,11 +32,15 @@ func main() {
 	logger := commonlog.GetLoggerf("%s.server", serverName)
 
 	if *standaloneView {
+		workspacePath, err := resolveWorkspacePath(*viewWorkspace)
+		if err != nil {
+			panic(err)
+		}
 		listenAddr, err := standaloneListenAddr(*viewPort)
 		if err != nil {
 			panic(err)
 		}
-		if err := runStandaloneView(logger, ".", listenAddr, *viewOpen); err != nil {
+		if err := runStandaloneView(logger, workspacePath, listenAddr, *viewOpen); err != nil {
 			panic(err)
 		}
 		return
@@ -65,4 +72,20 @@ func standaloneListenAddr(port int) (string, error) {
 		return "", fmt.Errorf("view-port must be in range [1,65535], got %d", port)
 	}
 	return fmt.Sprintf("127.0.0.1:%d", port), nil
+}
+
+func resolveWorkspacePath(raw string) (string, error) {
+	path := filepath.Clean(raw)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("view-workspace is not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("view-workspace must be a directory: %s", path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve view-workspace path: %w", err)
+	}
+	return abs, nil
 }

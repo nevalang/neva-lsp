@@ -10,6 +10,7 @@ body {
 .single-canvas-layout {
   height: 100vh;
   width: 100vw;
+  position: relative;
 }
 
 button {
@@ -36,6 +37,22 @@ button:disabled {
   width: 100%;
 }
 
+.canvas-toast {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 30;
+  max-width: min(46vw, 520px);
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #f9fafb;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  backdrop-filter: blur(2px);
+}
+
 .canvas-overlay {
   position: absolute;
   top: 12px;
@@ -44,41 +61,37 @@ button:disabled {
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid #d1d5db;
   border-radius: 10px;
-  padding: 10px 12px;
-  min-width: 420px;
-  max-width: min(70vw, 960px);
+  padding: 8px 10px;
+  min-width: 220px;
+  max-width: min(60vw, 760px);
   backdrop-filter: blur(2px);
-}
-
-.canvas-topline {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.canvas-topline h1 {
-  margin: 0;
-  font-size: 24px;
-  line-height: 1.1;
 }
 
 .canvas-nav-buttons {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 
 .canvas-nav-buttons button {
-  width: 38px;
+  width: 32px;
   text-align: center;
-  padding: 6px 0;
+  padding: 4px 0;
+}
+
+.canvas-nav-buttons .canvas-copy-url {
+  width: auto;
+  min-width: 44px;
+  padding: 4px 8px;
+  font-size: 11px;
+  text-transform: lowercase;
 }
 
 .canvas-breadcrumbs {
-  margin-top: 8px;
+  margin-top: 6px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   color: #374151;
 }
 
@@ -87,7 +100,7 @@ button:disabled {
   background: transparent;
   padding: 0;
   color: #374151;
-  font-size: 14px;
+  font-size: 13px;
   text-decoration: underline;
 }
 
@@ -98,13 +111,7 @@ button:disabled {
 
 .breadcrumb-sep {
   color: #6b7280;
-  margin: 0 4px;
-}
-
-.canvas-title {
-  margin-top: 8px;
-  font-size: 14px;
-  color: #4b5563;
+  margin: 0 2px;
 }
 
 .rf-node {
@@ -115,6 +122,11 @@ button:disabled {
   border-radius: 8px;
   padding: 12px 12px 10px;
   min-width: 240px;
+}
+
+.react-flow__node.rf-node-clickable .rf-node,
+.react-flow__node.rf-node-clickable .rf-port-node {
+  cursor: pointer;
 }
 
 .rf-node.rf-node-has-inbars {

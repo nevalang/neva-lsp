@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -128,47 +129,35 @@ func registerViewAPI(mux *http.ServeMux, build *ast.Build, manifestCurrent manif
 }
 
 func registerStaticUI(mux *http.ServeMux) {
-	distDir := resolveWebDistDir()
-	fileServer := http.FileServer(http.Dir(distDir))
+	var uiFS fs.FS
+	if override := strings.TrimSpace(os.Getenv("NEVA_LSP_WEB_DIST")); override != "" {
+		uiFS = os.DirFS(override)
+	} else {
+		embedded, err := embeddedWebDistFS()
+		if err != nil {
+			panic(fmt.Errorf("load embedded ui: %w", err))
+		}
+		uiFS = embedded
+	}
+	fileServer := http.FileServer(http.FS(uiFS))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/" {
 			assetRelPath := strings.TrimPrefix(filepath.Clean(req.URL.Path), string(filepath.Separator))
-			assetPath := filepath.Join(distDir, assetRelPath)
-			if _, err := os.Stat(assetPath); err == nil {
+			if _, err := fs.Stat(uiFS, assetRelPath); err == nil {
 				fileServer.ServeHTTP(w, req)
 				return
 			}
 		}
 
-		indexPath := filepath.Join(distDir, "index.html")
-		if _, err := os.Stat(indexPath); err != nil {
+		if _, err := fs.Stat(uiFS, "index.html"); err != nil {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("Standalone UI is not built yet. Build /web/dist (or set NEVA_LSP_WEB_DIST)."))
+			_, _ = w.Write([]byte("Standalone UI is not available. Build web/dist before go install, or set NEVA_LSP_WEB_DIST."))
 			return
 		}
-		http.ServeFile(w, req, indexPath)
+		http.ServeFileFS(w, req, uiFS, "index.html")
 	})
-}
-
-func resolveWebDistDir() string {
-	if override := strings.TrimSpace(os.Getenv("NEVA_LSP_WEB_DIST")); override != "" {
-		return override
-	}
-
-	if cwd, err := os.Getwd(); err == nil {
-		if stat, statErr := os.Stat(filepath.Join(cwd, "web", "dist", "index.html")); statErr == nil && !stat.IsDir() {
-			return filepath.Join(cwd, "web", "dist")
-		}
-	}
-
-	if executablePath, err := os.Executable(); err == nil {
-		executableDir := filepath.Dir(executablePath)
-		return filepath.Join(executableDir, "web", "dist")
-	}
-
-	return filepath.Join("web", "dist")
 }
 
 func resolveEntityRefInBuild(build *ast.Build, params ResolveEntityRefRequest) (ResolveEntityRefResult, error) {

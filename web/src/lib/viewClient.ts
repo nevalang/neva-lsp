@@ -70,6 +70,7 @@ function normalizeNode(node: Partial<NodeItem>): NodeItem {
     entityRef: node.entityRef,
     resolvedRef: node.resolvedRef,
     anchor: node.anchor,
+    errGuard: Boolean((node as any).errGuard),
   }
 }
 

@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { GraphCanvas } from './components/GraphCanvas'
+import { inferInitialRoute, isNativeComponent, routeExistsInProgram, type AppRoute } from './lib/appSemantics'
 import { viewClient } from './lib/viewClient'
 import type { FileView, ModuleSummary } from './lib/types'
 
-type Route =
-  | { kind: 'modules' }
-  | { kind: 'module'; modulePath: string }
-  | { kind: 'package'; modulePath: string; packageName: string }
-  | { kind: 'file'; fileId: string }
-  | { kind: 'component'; fileId: string; componentId: string }
+type Route = AppRoute
 
 type Breadcrumb = {
   key: string
@@ -87,6 +83,10 @@ function routeKey(route: Route): string {
   return JSON.stringify(route)
 }
 
+function routesEqual(a: Route, b: Route): boolean {
+  return routeKey(a) === routeKey(b)
+}
+
 function routeFileID(route: Route): string | null {
   if (route.kind === 'file' || route.kind === 'component') {
     return route.fileId
@@ -111,12 +111,14 @@ function fileDisplayName(fileID: string): string {
   return fileID
 }
 
+
 export function App() {
   const [modules, setModules] = useState<ModuleSummary[]>([])
   const [route, setRoute] = useState<Route>(() => parseHashRoute())
   const [fileCache, setFileCache] = useState<Record<string, FileView>>({})
   const [backStack, setBackStack] = useState<Route[]>([])
   const [forwardStack, setForwardStack] = useState<Route[]>([])
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   useEffect(() => {
     void reloadProgram()
@@ -128,10 +130,16 @@ export function App() {
       return
     }
 
-    void viewClient.getFileView(fileID).then((file) => {
-      setFileCache((prev) => ({ ...prev, [fileID]: file }))
-    })
-  }, [route, fileCache])
+    void viewClient.getFileView(fileID)
+      .then((file) => {
+        setFileCache((prev) => ({ ...prev, [fileID]: file }))
+      })
+      .catch(() => {
+        const fallback = inferInitialRoute(modules)
+        setRoute(fallback)
+        window.history.replaceState({}, '', routeToHash(fallback))
+      })
+  }, [route, fileCache, modules])
 
   useEffect(() => {
     function onPopState() {
@@ -149,10 +157,27 @@ export function App() {
       includeStd: true,
     })
     setModules(program.modules)
+
+    const initialRoute = inferInitialRoute(program.modules)
+    const hasExplicitHash = window.location.hash.replace(/^#/, '').length > 0
+    setRoute((current) => {
+      if (hasExplicitHash && routeExistsInProgram(current, program.modules)) {
+        return current
+      }
+      if (routeKey(initialRoute) === routeKey(current)) {
+        return current
+      }
+      window.history.replaceState({}, '', routeToHash(initialRoute))
+      return initialRoute
+    })
   }
 
   function navigate(next: Route, trackNav = true) {
-    if (trackNav && routeKey(route) !== routeKey(next)) {
+    if (routesEqual(route, next)) {
+      return
+    }
+
+    if (trackNav) {
       setBackStack((prev) => [...prev, route])
       setForwardStack([])
     }
@@ -170,7 +195,7 @@ export function App() {
     setBackStack((items) => items.slice(0, -1))
     setForwardStack((items) => [...items, route])
     setRoute(prev)
-    window.history.pushState({}, '', routeToHash(prev))
+    window.history.replaceState({}, '', routeToHash(prev))
   }
 
   function goForward() {
@@ -182,7 +207,7 @@ export function App() {
     setForwardStack((items) => items.slice(0, -1))
     setBackStack((items) => [...items, route])
     setRoute(next)
-    window.history.pushState({}, '', routeToHash(next))
+    window.history.replaceState({}, '', routeToHash(next))
   }
 
   const selectedFile = useMemo(() => {
@@ -195,19 +220,19 @@ export function App() {
 
   const breadcrumbs = useMemo<Breadcrumb[]>(() => {
     if (route.kind === 'modules') {
-      return [{ key: 'modules', label: 'modules', route: { kind: 'modules' } }]
+      return [{ key: 'modules', label: 'Modules', route: { kind: 'modules' } }]
     }
 
     if (route.kind === 'module') {
       return [
-        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+        { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
         { key: `module:${route.modulePath}`, label: route.modulePath, route },
       ]
     }
 
     if (route.kind === 'package') {
       return [
-        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+        { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
         { key: `module:${route.modulePath}`, label: route.modulePath, route: { kind: 'module', modulePath: route.modulePath } },
         { key: `package:${route.modulePath}:${route.packageName}`, label: route.packageName, route },
       ]
@@ -219,7 +244,7 @@ export function App() {
       const modulePath = parts[parts.indexOf('module') + 1] ?? ''
       const packageName = parts[parts.indexOf('package') + 1] ?? ''
       return [
-        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+        { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
         { key: `module:${modulePath}`, label: modulePath, route: { kind: 'module', modulePath } },
         { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
         { key: `file:${fileID}`, label: fileDisplayName(fileID), route },
@@ -233,7 +258,7 @@ export function App() {
     const componentName = route.componentId.split('/').pop() ?? route.componentId
 
     return [
-      { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+      { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
       { key: `module:${modulePath}`, label: modulePath, route: { kind: 'module', modulePath } },
       { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
       { key: `file:${fileID}`, label: fileDisplayName(fileID), route: { kind: 'file', fileId: fileID } },
@@ -245,6 +270,24 @@ export function App() {
     const result = await viewClient.resolveEntityRef(target.fileId, target.entityId)
     const nextRoute: Route = { kind: 'file', fileId: result.targetFileId }
     navigate(nextRoute, true)
+  }
+
+  function showToast(message: string) {
+    setToastMessage(message)
+    window.setTimeout(() => setToastMessage((current) => (current === message ? null : current)), 2600)
+  }
+
+  function handleNativeComponentClick(target: { fileId: string; entityId: string }) {
+    const file = fileCache[target.fileId]
+    if (!file) {
+      showToast('No Neva graph implementation for this component.')
+      return
+    }
+    if (isNativeComponent(file, target.entityId)) {
+      showToast('This component is runtime/native-only in Neva (no inner graph to open).')
+      return
+    }
+    showToast('Component graph is not available.')
   }
 
   return (
@@ -260,7 +303,9 @@ export function App() {
         onGoForward={goForward}
         onNavigate={navigate}
         onResolveOpen={resolveAndOpen}
+        onNativeComponentClick={handleNativeComponentClick}
       />
+      {toastMessage ? <div className="canvas-toast">{toastMessage}</div> : null}
     </main>
   )
 }

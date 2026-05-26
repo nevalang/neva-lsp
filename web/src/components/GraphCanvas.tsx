@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Background,
   Controls,
@@ -6,13 +6,14 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  type ReactFlowInstance,
   type Edge,
   type EdgeMouseHandler,
   type Node,
   type NodeProps,
-  type NodeMouseHandler,
 } from '@xyflow/react'
 import ELK from 'elkjs/lib/elk.bundled.js'
+import { endpointPortName, inferImplicitPortName, parseSignaturePorts, shouldAddImplicitErrEdge, shouldAddImplicitInputEdge } from '../lib/graphSemantics'
 import type { Component, FileView, ModuleSummary, Port } from '../lib/types'
 
 type Route =
@@ -39,6 +40,7 @@ type Props = {
   onGoForward: () => void
   onNavigate: (route: Route, trackNav?: boolean) => void
   onResolveOpen: (target: { fileId: string; entityId: string }) => Promise<void>
+  onNativeComponentClick: (target: { fileId: string; entityId: string }) => void
 }
 
 type NodeData = {
@@ -181,49 +183,6 @@ function normalizeEdgeLabel(label: string): string {
     .trim()
 }
 
-function parsePortList(raw: string, knownNames: string[]): Map<string, string> {
-  const result = new Map<string, string>()
-  const known = [...knownNames].sort((a, b) => b.length - a.length)
-  for (const chunk of raw.split(',')) {
-    const item = chunk.trim()
-    if (!item) continue
-    let name = ''
-    for (const candidate of known) {
-      if (item.startsWith(candidate)) {
-        name = candidate
-        break
-      }
-    }
-    if (!name) {
-      const fallback = item.match(/^([A-Za-z_][A-Za-z0-9_]*)(.*)$/)
-      if (!fallback) continue
-      name = fallback[1]
-    }
-    const type = item.slice(name.length).trim()
-    result.set(name, type)
-  }
-  return result
-}
-
-function parseSignaturePorts(
-  signatureText: string | undefined,
-  knownInNames: string[],
-  knownOutNames: string[],
-): { in: Map<string, string>; out: Map<string, string> } {
-  if (!signatureText) {
-    return { in: new Map<string, string>(), out: new Map<string, string>() }
-  }
-  const normalized = signatureText.replace(/\s+/g, '')
-  const pair = normalized.match(/\(([^()]*)\)\(([^()]*)\)/)
-  if (!pair) {
-    return { in: new Map<string, string>(), out: new Map<string, string>() }
-  }
-  return {
-    in: parsePortList(pair[1] ?? '', knownInNames),
-    out: parsePortList(pair[2] ?? '', knownOutNames),
-  }
-}
-
 function resolveNodeID(component: Component, endpoint: { node?: string; port?: string }): string | null {
   if (!endpoint.node) {
     return null
@@ -243,6 +202,7 @@ function moduleNodes(modules: ModuleSummary[]): Node<NodeData>[] {
   return modules.map((mod) => ({
     id: `module:${mod.path}`,
     type: 'entityNode',
+    className: 'rf-node-clickable',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav',
@@ -261,6 +221,7 @@ function packageNodes(modules: ModuleSummary[], modulePath: string): Node<NodeDa
   return moduleItem.packages.map((pkg) => ({
     id: `package:${modulePath}:${pkg.name}`,
     type: 'entityNode',
+    className: 'rf-node-clickable',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav',
@@ -281,6 +242,7 @@ function fileNodes(modules: ModuleSummary[], modulePath: string, packageName: st
   return pkg.fileSummaries.map((file) => ({
     id: `file:${file.id}`,
     type: 'entityNode',
+    className: 'rf-node-clickable',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav',
@@ -301,6 +263,7 @@ function fileEntityNodes(file: FileView): Node<NodeData>[] {
   const components = file.components.map((component) => ({
     id: `entity:${component.id}`,
     type: 'entityNode' as const,
+    className: canDrillComponent(component) ? 'rf-node-clickable' : undefined,
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav' as const,
@@ -373,16 +336,33 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
   for (const connection of component.connections) {
     if (connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out') {
       const item = nodePortKinds.get(connection.sender.node) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
-      const portName = connection.sender.port || 'sig'
+      const portName = endpointPortName(component, connection.sender, 'out')
       item.out.set(portName, '')
       nodePortKinds.set(connection.sender.node, item)
     }
     if (connection.receiver?.node && connection.receiver.node !== 'in' && connection.receiver.node !== 'out') {
       const item = nodePortKinds.get(connection.receiver.node) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
-      const portName = connection.receiver.port || 'sig'
+      const portName = endpointPortName(component, connection.receiver, 'in')
       item.in.set(portName, '')
       nodePortKinds.set(connection.receiver.node, item)
     }
+  }
+
+  for (const node of component.nodes) {
+    const inferredInPort = inferImplicitPortName(component, node.name, 'in')
+    if (shouldAddImplicitInputEdge(component, node.name, inferredInPort)) {
+      const item = nodePortKinds.get(node.name) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
+      const componentInType = component.inPorts.find((port) => port.name === inferredInPort)?.type ?? ''
+      item.in.set(inferredInPort, componentInType)
+      nodePortKinds.set(node.name, item)
+    }
+
+    if (!shouldAddImplicitErrEdge(component, node.name)) {
+      continue
+    }
+    const item = nodePortKinds.get(node.name) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
+    item.out.set('err', 'error')
+    nodePortKinds.set(node.name, item)
   }
 
   for (const node of component.nodes) {
@@ -425,6 +405,7 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
     result.push({
       id: endpointNodeID(component.id, node.name),
       type: 'entityNode',
+      className: node.resolvedRef?.fileId && node.resolvedRef?.entityId ? 'rf-node-clickable' : undefined,
       position: { x: 0, y: 0 },
       data: {
         kind: 'entity',
@@ -468,14 +449,37 @@ function componentDetailEdges(component: Component): Edge[] {
       source,
       target,
       sourceHandle: connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out'
-        ? handleIDForPort(connection.sender.port || 'sig')
+        ? handleIDForPort(endpointPortName(component, connection.sender, 'out'))
         : undefined,
       targetHandle: connection.receiver?.node && connection.receiver.node !== 'in' && connection.receiver.node !== 'out'
-        ? handleIDForPort(connection.receiver.port || 'sig')
+        ? handleIDForPort(endpointPortName(component, connection.receiver, 'in'))
         : undefined,
       label: normalizeEdgeLabel(`${formatEndpointLabel(connection.sender)} -> ${formatEndpointLabel(connection.receiver)}`),
     })
   }
+
+  for (const node of component.nodes) {
+    const inferredInPort = inferImplicitPortName(component, node.name, 'in')
+    if (shouldAddImplicitInputEdge(component, node.name, inferredInPort)) {
+      result.push({
+        id: `${component.id}/implicit_in/${inferredInPort}->${node.name}`,
+        source: endpointNodeID(component.id, 'in', inferredInPort),
+        target: endpointNodeID(component.id, node.name),
+        targetHandle: handleIDForPort(inferredInPort),
+      })
+    }
+
+    if (!shouldAddImplicitErrEdge(component, node.name)) {
+      continue
+    }
+    result.push({
+      id: `${component.id}/implicit_err/${node.name}`,
+      source: endpointNodeID(component.id, node.name),
+      target: endpointNodeID(component.id, 'out', 'err'),
+      sourceHandle: handleIDForPort('err'),
+    })
+  }
+
   return result
 }
 
@@ -518,29 +522,28 @@ export function GraphCanvas({
   onGoForward,
   onNavigate,
   onResolveOpen,
+  onNativeComponentClick,
 }: Props) {
   const [nodes, setNodes] = useState<Node<NodeData>[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   const [selectedEdgeID, setSelectedEdgeID] = useState<string | null>(null)
-  const [zoom, setZoom] = useState(1)
-  const [routeBaseZoom, setRouteBaseZoom] = useState<number | null>(null)
-  const [focusedNodeID, setFocusedNodeID] = useState<string | null>(null)
-  const [navLock, setNavLock] = useState(false)
+  const [flow, setFlow] = useState<ReactFlowInstance<Node<NodeData>, Edge> | null>(null)
+  const [layoutVersion, setLayoutVersion] = useState(0)
+  const [copyDone, setCopyDone] = useState(false)
 
   useEffect(() => {
     setSelectedEdgeID(null)
-    setRouteBaseZoom(null)
-    setNavLock(false)
   }, [route.kind])
 
-  const title = useMemo(() => {
-    if (route.kind === 'modules') return 'Modules'
-    if (route.kind === 'module') return `Module: ${route.modulePath}`
-    if (route.kind === 'package') return `Package: ${route.modulePath}/${route.packageName}`
-    if (route.kind === 'file') return file ? `File: ${file.name}.neva` : 'Loading file...'
-    const component = file?.components.find((item) => item.id === route.componentId)
-    return component ? `Component: ${component.name}` : 'Loading component...'
-  }, [route, file])
+  useEffect(() => {
+    if (!flow || nodes.length === 0 || layoutVersion === 0) {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      flow.fitView({ duration: 0, padding: 0.2 })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [flow, layoutVersion, nodes.length])
 
   useEffect(() => {
     let canceled = false
@@ -580,7 +583,7 @@ export function GraphCanvas({
 
         const component = file.components.find((item) => item.id === route.componentId)
         if (component) {
-          nextNodes = componentDetailNodes(component, zoom >= 1.2)
+          nextNodes = componentDetailNodes(component, true)
           nextEdges = componentDetailEdges(component).map((edge) => ({
             ...edge,
             label: edge.id === selectedEdgeID ? edge.label : '',
@@ -593,6 +596,7 @@ export function GraphCanvas({
       if (!canceled) {
         setNodes(laidOut)
         setEdges(nextEdges)
+        setLayoutVersion((v) => v + 1)
       }
     }
 
@@ -600,36 +604,20 @@ export function GraphCanvas({
     return () => {
       canceled = true
     }
-  }, [modules, route, file, selectedEdgeID, zoom])
+  }, [modules, route, file, selectedEdgeID])
 
   const onEdgeClick: EdgeMouseHandler = (_, edge) => {
     setSelectedEdgeID(edge.id)
   }
 
-  const onNodeMouseEnter: NodeMouseHandler<Node<NodeData>> = (_, node) => {
-    setFocusedNodeID(node.id)
-  }
-
-  function routeUp(current: Route): Route | null {
-    if (current.kind === 'component') {
-      return { kind: 'file', fileId: current.fileId }
+  async function copyCurrentURL() {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopyDone(true)
+      window.setTimeout(() => setCopyDone(false), 1200)
+    } catch {
+      setCopyDone(false)
     }
-    if (current.kind === 'file') {
-      const parts = current.fileId.split('/')
-      const modulePath = parts[parts.indexOf('module') + 1] ?? ''
-      const packageName = parts[parts.indexOf('package') + 1] ?? ''
-      if (modulePath && packageName) {
-        return { kind: 'package', modulePath, packageName }
-      }
-      return { kind: 'modules' }
-    }
-    if (current.kind === 'package') {
-      return { kind: 'module', modulePath: current.modulePath }
-    }
-    if (current.kind === 'module') {
-      return { kind: 'modules' }
-    }
-    return null
   }
 
   function routeDown(current: Route, node: Node<NodeData>): Route | null {
@@ -651,21 +639,15 @@ export function GraphCanvas({
     return null
   }
 
-  function withNavCooldown(fn: () => void) {
-    setNavLock(true)
-    fn()
-    window.setTimeout(() => setNavLock(false), 240)
-  }
-
   return (
     <section className="canvas-shell">
       <div className="canvas-overlay">
-        <div className="canvas-topline">
-          <div className="canvas-nav-buttons">
-            <button onClick={onGoBack} disabled={!canGoBack}>←</button>
-            <button onClick={onGoForward} disabled={!canGoForward}>→</button>
-          </div>
-          <h1>Neva View</h1>
+        <div className="canvas-nav-buttons">
+          <button onClick={onGoBack} disabled={!canGoBack}>←</button>
+          <button onClick={onGoForward} disabled={!canGoForward}>→</button>
+          <button className="canvas-copy-url" onClick={() => void copyCurrentURL()} title="Copy URL">
+            {copyDone ? 'ok' : 'copy'}
+          </button>
         </div>
         <div className="canvas-breadcrumbs">
           {breadcrumbs.map((crumb, index) => (
@@ -675,7 +657,6 @@ export function GraphCanvas({
             </span>
           ))}
         </div>
-        <div className="canvas-title">{title}</div>
       </div>
 
       <ReactFlow
@@ -684,45 +665,19 @@ export function GraphCanvas({
         nodeTypes={nodeTypes}
         nodesDraggable
         fitView
+        onInit={setFlow}
         onEdgeClick={onEdgeClick}
         onPaneClick={() => setSelectedEdgeID(null)}
-        onMove={(_, viewport) => {
-          const nextZoom = viewport.zoom
-          setZoom(nextZoom)
-
-          if (routeBaseZoom === null) {
-            setRouteBaseZoom(nextZoom)
-            return
-          }
-
-          if (navLock) {
-            return
-          }
-
-          const zoomInThreshold = routeBaseZoom * 1.18
-          const zoomOutThreshold = routeBaseZoom * 0.82
-
-          if (nextZoom >= zoomInThreshold && focusedNodeID) {
-            const focusedNode = nodes.find((n) => n.id === focusedNodeID)
-            if (focusedNode) {
-              const nextRoute = routeDown(route, focusedNode)
-              if (nextRoute) {
-                withNavCooldown(() => onNavigate(nextRoute, true))
-                return
-              }
-            }
-          }
-
-          if (nextZoom <= zoomOutThreshold) {
-            const upRoute = routeUp(route)
-            if (upRoute) {
-              withNavCooldown(() => onNavigate(upRoute, true))
-            }
-          }
-        }}
-        onNodeMouseEnter={onNodeMouseEnter}
         onNodeClick={(_, node) => {
-          setFocusedNodeID(node.id)
+          const nextRoute = routeDown(route, node)
+          if (nextRoute) {
+            onNavigate(nextRoute, true)
+            return
+          }
+          if (route.kind === 'file' && node.data.navType === 'component' && node.data.fileId && node.data.entityId) {
+            onNativeComponentClick({ fileId: node.data.fileId, entityId: node.data.entityId })
+            return
+          }
           if (route.kind === 'component' && node.data.fileId && node.data.entityId) {
             void onResolveOpen({ fileId: node.data.fileId, entityId: node.data.entityId })
           }

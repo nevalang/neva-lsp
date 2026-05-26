@@ -121,9 +121,12 @@ func TestRegisterStaticUI_ServesIndexAndAssets(t *testing.T) {
 	}
 }
 
-func TestResolveWebDistDir_UsesExecutableRelativeFallback(t *testing.T) {
-	t.Setenv("NEVA_LSP_WEB_DIST", "")
-	if got := resolveWebDistDir(); got == "" {
-		t.Fatal("resolveWebDistDir() returned empty path")
+func TestEmbeddedWebDistFS_HasIndex(t *testing.T) {
+	fsys, err := embeddedWebDistFS()
+	if err != nil {
+		t.Fatalf("embeddedWebDistFS() error: %v", err)
+	}
+	if _, err := fsys.Open("index.html"); err != nil {
+		t.Fatalf("embedded ui index.html open error: %v", err)
 	}
 }

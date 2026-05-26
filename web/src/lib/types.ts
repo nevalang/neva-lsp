@@ -45,6 +45,7 @@ export type NodeItem = {
   entityRef?: unknown
   resolvedRef?: ResolvedRef
   anchor?: SourceAnchor
+  errGuard?: boolean
 }
 
 export type Endpoint = {

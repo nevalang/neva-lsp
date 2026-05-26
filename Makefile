@@ -1,11 +1,21 @@
-.PHONY: install test
-# .PHONY: install test web
+.PHONY: install test test-web test-all web-install web-build view
 
-install:
+install: web-build
 	go install .
 
 test:
 	go test ./...
 
-# web: install
-# 	neva-lsp --view --view-port=7792
+test-web: web-install
+	cd web && npm test
+
+test-all: test test-web
+
+web-install:
+	cd web && npm ci
+
+web-build: web-install
+	cd web && npm run build
+
+view: install web-build
+	neva-lsp --view --view-port=7792 --view-workspace=.
