@@ -1,228 +1,266 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ProgramExplorer } from './components/ProgramExplorer'
-import { SearchPanel } from './components/SearchPanel'
 import { GraphCanvas } from './components/GraphCanvas'
-import { DetailsPanel } from './components/DetailsPanel'
-import { ManifestPanel } from './components/ManifestPanel'
 import { viewClient } from './lib/viewClient'
-import type {
-  FileSummary,
-  FileView,
-  ManifestView,
-  ModuleSummary,
-  SearchEntitiesResultItem,
-} from './lib/types'
+import type { FileView, ModuleSummary } from './lib/types'
 
-type NavState = {
-  fileId: string
-  fileName: string
-}
+type Route =
+  | { kind: 'modules' }
+  | { kind: 'module'; modulePath: string }
+  | { kind: 'package'; modulePath: string; packageName: string }
+  | { kind: 'file'; fileId: string }
+  | { kind: 'component'; fileId: string; componentId: string }
 
 type Breadcrumb = {
   key: string
   label: string
-  action: () => Promise<void> | void
+  route: Route
 }
 
-function parseFileIDFromHash(): string | null {
-  const raw = window.location.hash.replace(/^#/, '').trim()
-  if (!raw) {
-    return null
+function parseHashRoute(): Route {
+  const hash = window.location.hash.replace(/^#/, '')
+  if (!hash) {
+    return { kind: 'modules' }
   }
-  const decoded = decodeURIComponent(raw)
-  const split = decoded.split(':')
-  return split[0] || null
+
+  const params = new URLSearchParams(hash)
+  const kind = params.get('k')
+
+  if (kind === 'module') {
+    const modulePath = params.get('m')
+    if (modulePath) {
+      return { kind: 'module', modulePath }
+    }
+  }
+
+  if (kind === 'package') {
+    const modulePath = params.get('m')
+    const packageName = params.get('p')
+    if (modulePath && packageName) {
+      return { kind: 'package', modulePath, packageName }
+    }
+  }
+
+  if (kind === 'file') {
+    const fileId = params.get('f')
+    if (fileId) {
+      return { kind: 'file', fileId }
+    }
+  }
+
+  if (kind === 'component') {
+    const fileId = params.get('f')
+    const componentId = params.get('c')
+    if (fileId && componentId) {
+      return { kind: 'component', fileId, componentId }
+    }
+  }
+
+  return { kind: 'modules' }
+}
+
+function routeToHash(route: Route): string {
+  const params = new URLSearchParams()
+  params.set('k', route.kind)
+
+  if (route.kind === 'module') {
+    params.set('m', route.modulePath)
+  }
+
+  if (route.kind === 'package') {
+    params.set('m', route.modulePath)
+    params.set('p', route.packageName)
+  }
+
+  if (route.kind === 'file') {
+    params.set('f', route.fileId)
+  }
+
+  if (route.kind === 'component') {
+    params.set('f', route.fileId)
+    params.set('c', route.componentId)
+  }
+
+  return `#${params.toString()}`
+}
+
+function routeKey(route: Route): string {
+  return JSON.stringify(route)
+}
+
+function routeFileID(route: Route): string | null {
+  if (route.kind === 'file' || route.kind === 'component') {
+    return route.fileId
+  }
+  return null
+}
+
+function fileDisplayName(fileID: string): string {
+  const parts = fileID.split('/')
+  const moduleIdx = parts.indexOf('module')
+  const packageIdx = parts.indexOf('package')
+  const fileIdx = parts.indexOf('file')
+
+  const modulePath = moduleIdx >= 0 ? parts[moduleIdx + 1] : ''
+  const packageName = packageIdx >= 0 ? parts[packageIdx + 1] : ''
+  const fileName = fileIdx >= 0 ? parts[fileIdx + 1] : ''
+
+  if (modulePath && packageName && fileName) {
+    return `${modulePath}/${packageName}/${fileName}.neva`
+  }
+
+  return fileID
 }
 
 export function App() {
   const [modules, setModules] = useState<ModuleSummary[]>([])
-  const [selectedFile, setSelectedFile] = useState<FileView | null>(null)
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
-  const [manifest, setManifest] = useState<ManifestView | null>(null)
-  const [filters, setFilters] = useState({ includeCurrent: true, includeDeps: true, includeStd: true })
-  const [backStack, setBackStack] = useState<NavState[]>([])
-  const [forwardStack, setForwardStack] = useState<NavState[]>([])
+  const [route, setRoute] = useState<Route>(() => parseHashRoute())
+  const [fileCache, setFileCache] = useState<Record<string, FileView>>({})
+  const [backStack, setBackStack] = useState<Route[]>([])
+  const [forwardStack, setForwardStack] = useState<Route[]>([])
 
   useEffect(() => {
     void reloadProgram()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.includeCurrent, filters.includeDeps, filters.includeStd])
+  }, [])
+
+  useEffect(() => {
+    const fileID = routeFileID(route)
+    if (!fileID || fileCache[fileID]) {
+      return
+    }
+
+    void viewClient.getFileView(fileID).then((file) => {
+      setFileCache((prev) => ({ ...prev, [fileID]: file }))
+    })
+  }, [route, fileCache])
 
   useEffect(() => {
     function onPopState() {
-      const fileID = parseFileIDFromHash()
-      if (!fileID) {
-        return
-      }
-      void openFile({ id: fileID, name: fileID.split('/').pop() ?? fileID }, false)
+      setRoute(parseHashRoute())
     }
 
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function reloadProgram() {
-    const program = await viewClient.getProgram(filters)
+    const program = await viewClient.getProgram({
+      includeCurrent: true,
+      includeDeps: true,
+      includeStd: true,
+    })
     setModules(program.modules)
-
-    if (!selectedFileId) {
-      const fromHash = parseFileIDFromHash()
-      if (fromHash) {
-        await openFile({ id: fromHash, name: fromHash.split('/').pop() ?? fromHash }, false)
-        return
-      }
-
-      const firstFile = program.modules[0]?.packages[0]?.fileSummaries[0]
-      if (firstFile) {
-        await openFile({ id: firstFile.id, name: firstFile.name }, false)
-      }
-    }
   }
 
-  function currentNavState(): NavState | null {
-    if (!selectedFileId || !selectedFile) {
-      return null
-    }
-    return { fileId: selectedFileId, fileName: selectedFile.name }
-  }
-
-  async function openFile(file: FileSummary, trackNav = true) {
-    const current = currentNavState()
-    if (trackNav && current) {
-      setBackStack((prev) => [...prev, current])
+  function navigate(next: Route, trackNav = true) {
+    if (trackNav && routeKey(route) !== routeKey(next)) {
+      setBackStack((prev) => [...prev, route])
       setForwardStack([])
     }
 
-    const fileView = await viewClient.getFileView(file.id)
-    setManifest(null)
-    setSelectedFile(fileView)
-    setSelectedFileId(file.id)
-    window.history.pushState({}, '', `#${encodeURIComponent(file.id)}`)
+    setRoute(next)
+    window.history.pushState({}, '', routeToHash(next))
   }
 
-  async function openManifest(modulePath: string) {
-    const nextManifest = await viewClient.getManifest(modulePath)
-    setManifest(nextManifest)
-  }
-
-  async function search(query: string, kinds: string[], packages: string[], modulePaths: string[]): Promise<SearchEntitiesResultItem[]> {
-    return viewClient.searchEntities({ query, kinds, packages, modules: modulePaths })
-  }
-
-  async function openFromSearch(item: SearchEntitiesResultItem) {
-    await openFile({ id: item.fileId, name: item.fileId.split('/').pop() ?? item.label }, true)
-    setManifest(null)
-  }
-
-  async function openResolved(target: { fileId: string; entityId: string }) {
-    const result = await viewClient.resolveEntityRef(target.fileId, target.entityId)
-    await openFile({ id: result.targetFileId, name: result.targetName }, true)
-    setManifest(null)
-  }
-
-  async function goBack() {
+  function goBack() {
     const prev = backStack[backStack.length - 1]
     if (!prev) {
       return
     }
 
-    const current = currentNavState()
-    if (current) {
-      setForwardStack((items) => [...items, current])
-    }
-
     setBackStack((items) => items.slice(0, -1))
-    await openFile({ id: prev.fileId, name: prev.fileName }, false)
+    setForwardStack((items) => [...items, route])
+    setRoute(prev)
+    window.history.pushState({}, '', routeToHash(prev))
   }
 
-  async function goForward() {
+  function goForward() {
     const next = forwardStack[forwardStack.length - 1]
     if (!next) {
       return
     }
 
-    const current = currentNavState()
-    if (current) {
-      setBackStack((items) => [...items, current])
-    }
-
     setForwardStack((items) => items.slice(0, -1))
-    await openFile({ id: next.fileId, name: next.fileName }, false)
+    setBackStack((items) => [...items, route])
+    setRoute(next)
+    window.history.pushState({}, '', routeToHash(next))
   }
 
+  const selectedFile = useMemo(() => {
+    const fileID = routeFileID(route)
+    if (!fileID) {
+      return null
+    }
+    return fileCache[fileID] ?? null
+  }, [route, fileCache])
+
   const breadcrumbs = useMemo<Breadcrumb[]>(() => {
-    if (!selectedFileId) {
-      return []
+    if (route.kind === 'modules') {
+      return [{ key: 'modules', label: 'modules', route: { kind: 'modules' } }]
     }
 
-    const parts = selectedFileId.split('/')
-    const moduleIdx = parts.indexOf('module')
-    const packageIdx = parts.indexOf('package')
-    const fileIdx = parts.indexOf('file')
-
-    const modulePath = moduleIdx >= 0 ? parts[moduleIdx + 1] : ''
-    const packageName = packageIdx >= 0 ? parts[packageIdx + 1] : ''
-    const fileName = fileIdx >= 0 ? parts[fileIdx + 1] : ''
-
-    if (!(modulePath && packageName && fileName)) {
-      return []
+    if (route.kind === 'module') {
+      return [
+        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+        { key: `module:${route.modulePath}`, label: route.modulePath, route },
+      ]
     }
 
-    return [{
-      key: `filepath:${selectedFileId}`,
-      label: `${modulePath} / ${packageName} / ${fileName}.neva`,
-      action: async () => {
-        await openFile({ id: selectedFileId, name: fileName }, false)
-      },
-    }]
-  }, [modules, selectedFileId])
+    if (route.kind === 'package') {
+      return [
+        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+        { key: `module:${route.modulePath}`, label: route.modulePath, route: { kind: 'module', modulePath: route.modulePath } },
+        { key: `package:${route.modulePath}:${route.packageName}`, label: route.packageName, route },
+      ]
+    }
+
+    if (route.kind === 'file') {
+      const fileID = route.fileId
+      const parts = fileID.split('/')
+      const modulePath = parts[parts.indexOf('module') + 1] ?? ''
+      const packageName = parts[parts.indexOf('package') + 1] ?? ''
+      return [
+        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+        { key: `module:${modulePath}`, label: modulePath, route: { kind: 'module', modulePath } },
+        { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
+        { key: `file:${fileID}`, label: fileDisplayName(fileID), route },
+      ]
+    }
+
+    const fileID = route.fileId
+    const parts = fileID.split('/')
+    const modulePath = parts[parts.indexOf('module') + 1] ?? ''
+    const packageName = parts[parts.indexOf('package') + 1] ?? ''
+    const componentName = route.componentId.split('/').pop() ?? route.componentId
+
+    return [
+      { key: 'modules', label: 'modules', route: { kind: 'modules' } },
+      { key: `module:${modulePath}`, label: modulePath, route: { kind: 'module', modulePath } },
+      { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
+      { key: `file:${fileID}`, label: fileDisplayName(fileID), route: { kind: 'file', fileId: fileID } },
+      { key: `component:${route.componentId}`, label: componentName, route },
+    ]
+  }, [route])
+
+  async function resolveAndOpen(target: { fileId: string; entityId: string }) {
+    const result = await viewClient.resolveEntityRef(target.fileId, target.entityId)
+    const nextRoute: Route = { kind: 'file', fileId: result.targetFileId }
+    navigate(nextRoute, true)
+  }
 
   return (
-    <div className="layout">
-      <aside className="left">
-        <section className="panel">
-          <h2>Scope</h2>
-          <label><input type="checkbox" checked={filters.includeCurrent} onChange={(e) => setFilters((prev) => ({ ...prev, includeCurrent: e.target.checked }))} /> current (@)</label>
-          <label><input type="checkbox" checked={filters.includeDeps} onChange={(e) => setFilters((prev) => ({ ...prev, includeDeps: e.target.checked }))} /> deps</label>
-          <label><input type="checkbox" checked={filters.includeStd} onChange={(e) => setFilters((prev) => ({ ...prev, includeStd: e.target.checked }))} /> std</label>
-        </section>
-
-        <SearchPanel modules={modules} onSearch={search} onOpenResult={openFromSearch} />
-        <ProgramExplorer
-          modules={modules}
-          selectedFileId={selectedFileId}
-          onSelectFile={(file) => { void openFile(file, true) }}
-          onOpenManifest={openManifest}
-        />
-      </aside>
-
-      <main className="right">
-        <div className="topbar">
-          <h1>Neva View</h1>
-        </div>
-
-        {breadcrumbs.length > 0 && (
-          <div className="breadcrumbs panel">
-            <div className="breadcrumbs-nav">
-              <button onClick={() => void goBack()} disabled={backStack.length === 0}>←</button>
-              <button onClick={() => void goForward()} disabled={forwardStack.length === 0}>→</button>
-            </div>
-            <div className="breadcrumbs-items">
-              {breadcrumbs.map((crumb, index) => (
-                <span key={crumb.key}>
-                  <button className="breadcrumb-link" onClick={() => void crumb.action()}>{crumb.label}</button>
-                  {index < breadcrumbs.length - 1 ? <span className="breadcrumb-sep"> / </span> : null}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <ManifestPanel manifest={manifest} />
-        <DetailsPanel file={selectedFile} />
-        <GraphCanvas file={selectedFile} onNodeOpen={openResolved} />
-      </main>
-    </div>
+    <main className="single-canvas-layout">
+      <GraphCanvas
+        modules={modules}
+        route={route}
+        file={selectedFile}
+        breadcrumbs={breadcrumbs}
+        canGoBack={backStack.length > 0}
+        canGoForward={forwardStack.length > 0}
+        onGoBack={goBack}
+        onGoForward={goForward}
+        onNavigate={navigate}
+        onResolveOpen={resolveAndOpen}
+      />
+    </main>
   )
 }

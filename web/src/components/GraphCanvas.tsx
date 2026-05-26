@@ -10,21 +10,40 @@ import {
   type EdgeMouseHandler,
   type Node,
   type NodeProps,
+  type NodeMouseHandler,
 } from '@xyflow/react'
 import ELK from 'elkjs/lib/elk.bundled.js'
-import type { Component, FileView, Interface, Port } from '../lib/types'
+import type { Component, FileView, ModuleSummary, Port } from '../lib/types'
 
-type Props = {
-  file: FileView | null
-  onNodeOpen: (target: { fileId: string; entityId: string }) => Promise<void>
+type Route =
+  | { kind: 'modules' }
+  | { kind: 'module'; modulePath: string }
+  | { kind: 'package'; modulePath: string; packageName: string }
+  | { kind: 'file'; fileId: string }
+  | { kind: 'component'; fileId: string; componentId: string }
+
+type Breadcrumb = {
+  key: string
+  label: string
+  route: Route
 }
 
-type CanvasMode =
-  | { kind: 'overview' }
-  | { kind: 'component'; componentId: string }
+type Props = {
+  modules: ModuleSummary[]
+  route: Route
+  file: FileView | null
+  breadcrumbs: Breadcrumb[]
+  canGoBack: boolean
+  canGoForward: boolean
+  onGoBack: () => void
+  onGoForward: () => void
+  onNavigate: (route: Route, trackNav?: boolean) => void
+  onResolveOpen: (target: { fileId: string; entityId: string }) => Promise<void>
+}
 
 type NodeData = {
-  kind: 'entity' | 'port'
+  kind: 'entity' | 'port' | 'nav'
+  navType?: 'module' | 'package' | 'file' | 'component' | 'interface' | 'type' | 'const'
   portRole?: 'in' | 'out'
   label: string
   subtitle?: string
@@ -33,6 +52,9 @@ type NodeData = {
   outPorts?: Port[]
   fileId?: string
   entityId?: string
+  modulePath?: string
+  packageName?: string
+  componentId?: string
 }
 
 const elk = new ELK()
@@ -217,37 +239,131 @@ function resolveNodeID(component: Component, endpoint: { node?: string; port?: s
   return endpointNodeID(component.id, endpoint.node)
 }
 
-function componentOverviewNode(component: Component): Node<NodeData> {
-  return {
-    id: `overview::${component.id}`,
+function moduleNodes(modules: ModuleSummary[]): Node<NodeData>[] {
+  return modules.map((mod) => ({
+    id: `module:${mod.path}`,
     type: 'entityNode',
     position: { x: 0, y: 0 },
     data: {
-      kind: 'entity',
-      label: component.name,
-      subtitle: 'component',
+      kind: 'nav',
+      navType: 'module',
+      label: mod.path,
+      subtitle: `${mod.packages.length} packages`,
       showMeta: true,
-      inPorts: component.inPorts,
-      outPorts: component.outPorts,
-      entityId: component.id,
+      modulePath: mod.path,
     },
-  }
+  }))
 }
 
-function interfaceOverviewNode(iface: Interface): Node<NodeData> {
-  return {
-    id: `overview::${iface.id}`,
+function packageNodes(modules: ModuleSummary[], modulePath: string): Node<NodeData>[] {
+  const moduleItem = modules.find((item) => item.path === modulePath)
+  if (!moduleItem) return []
+  return moduleItem.packages.map((pkg) => ({
+    id: `package:${modulePath}:${pkg.name}`,
     type: 'entityNode',
     position: { x: 0, y: 0 },
     data: {
-      kind: 'entity',
+      kind: 'nav',
+      navType: 'package',
+      label: pkg.name,
+      subtitle: `${pkg.fileSummaries.length} files`,
+      showMeta: true,
+      modulePath,
+      packageName: pkg.name,
+    },
+  }))
+}
+
+function fileNodes(modules: ModuleSummary[], modulePath: string, packageName: string): Node<NodeData>[] {
+  const moduleItem = modules.find((item) => item.path === modulePath)
+  const pkg = moduleItem?.packages.find((item) => item.name === packageName)
+  if (!pkg) return []
+  return pkg.fileSummaries.map((file) => ({
+    id: `file:${file.id}`,
+    type: 'entityNode',
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'nav',
+      navType: 'file',
+      label: `${file.name}.neva`,
+      subtitle: `${modulePath}/${packageName}`,
+      showMeta: true,
+      fileId: file.id,
+    },
+  }))
+}
+
+function canDrillComponent(component: Component): boolean {
+  return component.nodes.length > 0 || component.connections.length > 0
+}
+
+function fileEntityNodes(file: FileView): Node<NodeData>[] {
+  const components = file.components.map((component) => ({
+    id: `entity:${component.id}`,
+    type: 'entityNode' as const,
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'nav' as const,
+      navType: 'component' as const,
+      label: component.name,
+      subtitle: canDrillComponent(component) ? 'component' : 'component (native)',
+      showMeta: true,
+      fileId: file.id,
+      entityId: component.id,
+      componentId: component.id,
+      inPorts: component.inPorts,
+      outPorts: component.outPorts,
+    },
+  }))
+
+  const interfaces = file.interfaces.map((iface) => ({
+    id: `entity:${iface.id}`,
+    type: 'entityNode' as const,
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'nav' as const,
+      navType: 'interface' as const,
       label: iface.name,
       subtitle: 'interface',
       showMeta: true,
+      fileId: file.id,
+      entityId: iface.id,
       inPorts: iface.inPorts,
       outPorts: iface.outPorts,
     },
-  }
+  }))
+
+  const types = file.types.map((item) => ({
+    id: `entity:${item.id}`,
+    type: 'entityNode' as const,
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'nav' as const,
+      navType: 'type' as const,
+      label: item.name,
+      subtitle: 'type',
+      showMeta: true,
+      fileId: file.id,
+      entityId: item.id,
+    },
+  }))
+
+  const consts = file.consts.map((item) => ({
+    id: `entity:${item.id}`,
+    type: 'entityNode' as const,
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'nav' as const,
+      navType: 'const' as const,
+      label: item.name,
+      subtitle: 'const',
+      showMeta: true,
+      fileId: file.id,
+      entityId: item.id,
+    },
+  }))
+
+  return [...components, ...interfaces, ...types, ...consts]
 }
 
 function componentDetailNodes(component: Component, showMeta: boolean): Node<NodeData>[] {
@@ -363,14 +479,14 @@ function componentDetailEdges(component: Component): Edge[] {
   return result
 }
 
-async function applyLayout(nodes: Node<NodeData>[], edges: Edge[]): Promise<Node<NodeData>[]> {
+async function applyLayout(nodes: Node<NodeData>[], edges: Edge[], direction: 'DOWN' | 'RIGHT' = 'DOWN'): Promise<Node<NodeData>[]> {
   const graph = {
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
-      'elk.direction': 'DOWN',
-      'elk.spacing.nodeNode': '48',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '60',
+      'elk.direction': direction,
+      'elk.spacing.nodeNode': '40',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '58',
     },
     children: nodes.map((node) => ({ id: node.id, width: node.data.kind === 'port' ? 120 : 320, height: node.data.kind === 'port' ? 70 : 120 })),
     edges: edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
@@ -391,55 +507,89 @@ async function applyLayout(nodes: Node<NodeData>[], edges: Edge[]): Promise<Node
   })
 }
 
-export function GraphCanvas({ file, onNodeOpen }: Props) {
-  const [mode, setMode] = useState<CanvasMode>({ kind: 'overview' })
+export function GraphCanvas({
+  modules,
+  route,
+  file,
+  breadcrumbs,
+  canGoBack,
+  canGoForward,
+  onGoBack,
+  onGoForward,
+  onNavigate,
+  onResolveOpen,
+}: Props) {
   const [nodes, setNodes] = useState<Node<NodeData>[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   const [selectedEdgeID, setSelectedEdgeID] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [routeBaseZoom, setRouteBaseZoom] = useState<number | null>(null)
+  const [focusedNodeID, setFocusedNodeID] = useState<string | null>(null)
+  const [navLock, setNavLock] = useState(false)
 
   useEffect(() => {
-    setMode({ kind: 'overview' })
     setSelectedEdgeID(null)
-  }, [file?.id])
+    setRouteBaseZoom(null)
+    setNavLock(false)
+  }, [route.kind])
 
   const title = useMemo(() => {
-    if (!file) return 'Canvas'
-    if (mode.kind === 'overview') return `File canvas: ${file.name}.neva`
-    const component = file.components.find((item) => item.id === mode.componentId)
-    return component ? `Component: ${component.name}` : `File canvas: ${file.name}.neva`
-  }, [file, mode])
+    if (route.kind === 'modules') return 'Modules'
+    if (route.kind === 'module') return `Module: ${route.modulePath}`
+    if (route.kind === 'package') return `Package: ${route.modulePath}/${route.packageName}`
+    if (route.kind === 'file') return file ? `File: ${file.name}.neva` : 'Loading file...'
+    const component = file?.components.find((item) => item.id === route.componentId)
+    return component ? `Component: ${component.name}` : 'Loading component...'
+  }, [route, file])
 
   useEffect(() => {
     let canceled = false
 
     async function run() {
-      if (!file) {
-        setNodes([])
-        setEdges([])
-        return
-      }
-
       let nextNodes: Node<NodeData>[] = []
       let nextEdges: Edge[] = []
+      let direction: 'DOWN' | 'RIGHT' = 'DOWN'
 
-      if (mode.kind === 'overview') {
-        nextNodes = [
-          ...file.components.map(componentOverviewNode),
-          ...file.interfaces.map(interfaceOverviewNode),
-        ]
-      } else {
-        const component = file.components.find((item) => item.id === mode.componentId)
+      if (route.kind === 'modules') {
+        nextNodes = moduleNodes(modules)
+      }
+
+      if (route.kind === 'module') {
+        nextNodes = packageNodes(modules, route.modulePath)
+      }
+
+      if (route.kind === 'package') {
+        nextNodes = fileNodes(modules, route.modulePath, route.packageName)
+      }
+
+      if (route.kind === 'file') {
+        if (!file) {
+          setNodes([])
+          setEdges([])
+          return
+        }
+        nextNodes = fileEntityNodes(file)
+      }
+
+      if (route.kind === 'component') {
+        if (!file) {
+          setNodes([])
+          setEdges([])
+          return
+        }
+
+        const component = file.components.find((item) => item.id === route.componentId)
         if (component) {
           nextNodes = componentDetailNodes(component, zoom >= 1.2)
           nextEdges = componentDetailEdges(component).map((edge) => ({
             ...edge,
             label: edge.id === selectedEdgeID ? edge.label : '',
           }))
+          direction = 'DOWN'
         }
       }
 
-      const laidOut = await applyLayout(nextNodes, nextEdges)
+      const laidOut = await applyLayout(nextNodes, nextEdges, direction)
       if (!canceled) {
         setNodes(laidOut)
         setEdges(nextEdges)
@@ -450,48 +600,138 @@ export function GraphCanvas({ file, onNodeOpen }: Props) {
     return () => {
       canceled = true
     }
-  }, [file, mode, selectedEdgeID, zoom])
+  }, [modules, route, file, selectedEdgeID, zoom])
 
   const onEdgeClick: EdgeMouseHandler = (_, edge) => {
     setSelectedEdgeID(edge.id)
   }
 
-  if (!file) {
-    return <div className="panel">Select file to render canvas.</div>
+  const onNodeMouseEnter: NodeMouseHandler<Node<NodeData>> = (_, node) => {
+    setFocusedNodeID(node.id)
+  }
+
+  function routeUp(current: Route): Route | null {
+    if (current.kind === 'component') {
+      return { kind: 'file', fileId: current.fileId }
+    }
+    if (current.kind === 'file') {
+      const parts = current.fileId.split('/')
+      const modulePath = parts[parts.indexOf('module') + 1] ?? ''
+      const packageName = parts[parts.indexOf('package') + 1] ?? ''
+      if (modulePath && packageName) {
+        return { kind: 'package', modulePath, packageName }
+      }
+      return { kind: 'modules' }
+    }
+    if (current.kind === 'package') {
+      return { kind: 'module', modulePath: current.modulePath }
+    }
+    if (current.kind === 'module') {
+      return { kind: 'modules' }
+    }
+    return null
+  }
+
+  function routeDown(current: Route, node: Node<NodeData>): Route | null {
+    if (current.kind === 'modules' && node.data.modulePath) {
+      return { kind: 'module', modulePath: node.data.modulePath }
+    }
+    if (current.kind === 'module' && node.data.modulePath && node.data.packageName) {
+      return { kind: 'package', modulePath: node.data.modulePath, packageName: node.data.packageName }
+    }
+    if (current.kind === 'package' && node.data.fileId) {
+      return { kind: 'file', fileId: node.data.fileId }
+    }
+    if (current.kind === 'file' && node.data.navType === 'component' && node.data.fileId && node.data.componentId) {
+      const component = file?.components.find((item) => item.id === node.data.componentId)
+      if (component && canDrillComponent(component)) {
+        return { kind: 'component', fileId: node.data.fileId, componentId: node.data.componentId }
+      }
+    }
+    return null
+  }
+
+  function withNavCooldown(fn: () => void) {
+    setNavLock(true)
+    fn()
+    window.setTimeout(() => setNavLock(false), 240)
   }
 
   return (
-    <section className="panel graph-panel">
-      <div className="graph-panel-head">
-        <h2>{title}</h2>
-        {mode.kind === 'component' && <button onClick={() => setMode({ kind: 'overview' })}>Back to file</button>}
+    <section className="canvas-shell">
+      <div className="canvas-overlay">
+        <div className="canvas-topline">
+          <div className="canvas-nav-buttons">
+            <button onClick={onGoBack} disabled={!canGoBack}>←</button>
+            <button onClick={onGoForward} disabled={!canGoForward}>→</button>
+          </div>
+          <h1>Neva View</h1>
+        </div>
+        <div className="canvas-breadcrumbs">
+          {breadcrumbs.map((crumb, index) => (
+            <span key={crumb.key}>
+              <button className="breadcrumb-link" onClick={() => onNavigate(crumb.route, true)}>{crumb.label}</button>
+              {index < breadcrumbs.length - 1 ? <span className="breadcrumb-sep"> / </span> : null}
+            </span>
+          ))}
+        </div>
+        <div className="canvas-title">{title}</div>
       </div>
-      <div className="graph-root">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          nodesDraggable
-          fitView
-          onEdgeClick={onEdgeClick}
-          onPaneClick={() => setSelectedEdgeID(null)}
-          onMove={(_, viewport) => setZoom(viewport.zoom)}
-          onNodeClick={(_, node) => {
-            if (mode.kind === 'overview' && node.data.entityId) {
-              setMode({ kind: 'component', componentId: node.data.entityId })
-              return
-            }
 
-            if (mode.kind === 'component' && node.data.fileId && node.data.entityId) {
-              void onNodeOpen({ fileId: node.data.fileId, entityId: node.data.entityId })
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        nodesDraggable
+        fitView
+        onEdgeClick={onEdgeClick}
+        onPaneClick={() => setSelectedEdgeID(null)}
+        onMove={(_, viewport) => {
+          const nextZoom = viewport.zoom
+          setZoom(nextZoom)
+
+          if (routeBaseZoom === null) {
+            setRouteBaseZoom(nextZoom)
+            return
+          }
+
+          if (navLock) {
+            return
+          }
+
+          const zoomInThreshold = routeBaseZoom * 1.18
+          const zoomOutThreshold = routeBaseZoom * 0.82
+
+          if (nextZoom >= zoomInThreshold && focusedNodeID) {
+            const focusedNode = nodes.find((n) => n.id === focusedNodeID)
+            if (focusedNode) {
+              const nextRoute = routeDown(route, focusedNode)
+              if (nextRoute) {
+                withNavCooldown(() => onNavigate(nextRoute, true))
+                return
+              }
             }
-          }}
-        >
-          <MiniMap />
-          <Controls />
-          <Background />
-        </ReactFlow>
-      </div>
+          }
+
+          if (nextZoom <= zoomOutThreshold) {
+            const upRoute = routeUp(route)
+            if (upRoute) {
+              withNavCooldown(() => onNavigate(upRoute, true))
+            }
+          }
+        }}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeClick={(_, node) => {
+          setFocusedNodeID(node.id)
+          if (route.kind === 'component' && node.data.fileId && node.data.entityId) {
+            void onResolveOpen({ fileId: node.data.fileId, entityId: node.data.entityId })
+          }
+        }}
+      >
+        <MiniMap />
+        <Controls />
+        <Background />
+      </ReactFlow>
     </section>
   )
 }

@@ -20,3 +20,9 @@ go.work
 # Web workspace artifacts
 web/node_modules/
 web/dist/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
+
+# Local dev binary
+neva-lsp-view
