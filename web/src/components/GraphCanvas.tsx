@@ -720,16 +720,17 @@ export function GraphCanvas({
           zoomable
           nodeClassName={(node) => `minimap-node ${node.className ?? ''}`}
           nodeColor={(node) => {
-            if (node.className?.includes('rf-node-kind-interface')) return theme === 'dark' ? '#8f95a3' : '#9098a4'
-            if (node.className?.includes('rf-node-kind-type')) return theme === 'dark' ? '#7fa6c2' : '#7b9db5'
-            if (node.className?.includes('rf-node-kind-const')) return theme === 'dark' ? '#d0a06f' : '#bf8a57'
-            if (node.className?.includes('rf-node-kind-file')) return theme === 'dark' ? '#7fb59a' : '#6a9f83'
-            if (node.className?.includes('rf-node-clickable')) return theme === 'dark' ? '#d19a66' : '#b97f4a'
-            return theme === 'dark' ? '#818998' : '#969eaa'
+            if (node.className?.includes('rf-node-kind-interface')) return theme === 'dark' ? '#aab2c0' : '#4f5e72'
+            if (node.className?.includes('rf-node-kind-type')) return theme === 'dark' ? '#8bc2e2' : '#2f6f97'
+            if (node.className?.includes('rf-node-kind-const')) return theme === 'dark' ? '#e5b889' : '#8a5a2a'
+            if (node.className?.includes('rf-node-kind-file')) return theme === 'dark' ? '#95cfb3' : '#2d7f5b'
+            if (node.className?.includes('rf-node-clickable')) return theme === 'dark' ? '#efc18f' : '#8c5a2f'
+            return theme === 'dark' ? '#9ea7b6' : '#556172'
           }}
           nodeStrokeColor={theme === 'dark' ? '#c9ced6' : '#4a4f57'}
+          nodeStrokeWidth={2}
           nodeBorderRadius={4}
-          maskColor={theme === 'dark' ? 'rgba(26, 29, 36, 0.58)' : 'rgba(245, 245, 245, 0.7)'}
+          maskColor={theme === 'dark' ? 'rgba(20, 22, 28, 0.18)' : 'rgba(255, 255, 255, 0.2)'}
         />
         <Controls />
         <Background />

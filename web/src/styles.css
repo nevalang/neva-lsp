@@ -345,8 +345,12 @@ button:disabled {
 }
 
 .react-flow__minimap .minimap-node {
-  opacity: 0.96;
-  stroke-width: 1.2;
+  opacity: 1 !important;
+  stroke-width: 2 !important;
+}
+
+.react-flow__minimap-mask {
+  fill-opacity: 0.2 !important;
 }
 
 .react-flow__controls {
