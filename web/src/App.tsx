@@ -131,10 +131,7 @@ function routeFileID(route: Route): string | null {
 }
 
 function fileDisplayName(fileID: string): string {
-  const { packageName, fileName } = parseFileID(fileID)
-  if (packageName && fileName) {
-    return `${packageName}/${fileName}.neva`
-  }
+  const { fileName } = parseFileID(fileID)
   if (fileName) {
     return `${fileName}.neva`
   }
