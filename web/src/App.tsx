@@ -260,19 +260,19 @@ export function App() {
 
   const breadcrumbs = useMemo<Breadcrumb[]>(() => {
     if (route.kind === 'modules') {
-      return [{ key: 'modules', label: 'Modules', route: { kind: 'modules' } }]
+      return [{ key: 'modules', label: 'modules', route: { kind: 'modules' } }]
     }
 
     if (route.kind === 'module') {
       return [
-        { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
+        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
         { key: `module:${route.modulePath}`, label: displayModuleLabel(route.modulePath), route },
       ]
     }
 
     if (route.kind === 'package') {
       return [
-        { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
+        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
         { key: `module:${route.modulePath}`, label: displayModuleLabel(route.modulePath), route: { kind: 'module', modulePath: route.modulePath } },
         { key: `package:${route.modulePath}:${route.packageName}`, label: route.packageName, route },
       ]
@@ -282,7 +282,7 @@ export function App() {
       const fileID = route.fileId
       const { modulePath, packageName } = parseFileID(fileID)
       return [
-        { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
+        { key: 'modules', label: 'modules', route: { kind: 'modules' } },
         { key: `module:${modulePath}`, label: displayModuleLabel(modulePath), route: { kind: 'module', modulePath } },
         { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
         { key: `file:${fileID}`, label: fileDisplayName(fileID), route },
@@ -294,7 +294,7 @@ export function App() {
     const componentName = displayEntityName(route.componentId)
 
     return [
-      { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
+      { key: 'modules', label: 'modules', route: { kind: 'modules' } },
       { key: `module:${modulePath}`, label: displayModuleLabel(modulePath), route: { kind: 'module', modulePath } },
       { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
       { key: `file:${fileID}`, label: fileDisplayName(fileID), route: { kind: 'file', fileId: fileID } },

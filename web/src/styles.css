@@ -185,12 +185,14 @@ button:disabled {
   padding: 0;
   color: var(--text-muted);
   font-size: 13px;
-  text-decoration: underline;
+  text-decoration: none;
 }
 
-.breadcrumb-link:hover {
+.breadcrumb-link:hover,
+.breadcrumb-link:focus-visible {
   background: transparent;
   color: var(--text);
+  text-decoration: underline;
 }
 
 .breadcrumb-sep {
