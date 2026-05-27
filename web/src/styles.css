@@ -350,29 +350,40 @@ button:disabled {
 }
 
 .react-flow__controls {
-  border: 1px solid color-mix(in srgb, var(--strong-border) 72%, #000);
+  border: 1px solid color-mix(in srgb, var(--strong-border) 72%, #000) !important;
   border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28) !important;
+  background: color-mix(in srgb, var(--bg) 72%, #000) !important;
 }
 
 .react-flow__controls-button {
-  background: color-mix(in srgb, var(--bg) 64%, #000);
-  color: color-mix(in srgb, #ffffff 88%, var(--text));
-  border-bottom: 1px solid color-mix(in srgb, var(--strong-border) 70%, #000);
+  background: color-mix(in srgb, var(--bg) 64%, #000) !important;
+  color: #f2f4f8 !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--strong-border) 70%, #000) !important;
+  box-shadow: none !important;
 }
 
 .react-flow__controls-button:hover {
-  background: color-mix(in srgb, var(--bg) 52%, #000);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--bg) 52%, #000) !important;
+  color: #ffffff !important;
 }
 
 .react-flow__controls-button svg {
-  fill: currentColor;
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: currentColor !important;
 }
 
 .react-flow__controls-button svg * {
-  stroke: currentColor;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+.react-flow__controls-button:disabled {
+  background: color-mix(in srgb, var(--bg) 62%, #000) !important;
+  color: #a9b1bf !important;
 }
 
 .react-flow__node.rf-node-kind-module .rf-node {
