@@ -339,18 +339,25 @@ button:disabled {
 }
 
 .react-flow__minimap {
-  background: color-mix(in srgb, var(--surface) 76%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--strong-border) 72%, #000);
+  background: color-mix(in srgb, var(--surface) 68%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--strong-border) 78%, #000);
   border-radius: 8px;
 }
 
+.react-flow__minimap svg {
+  display: block;
+}
+
+.react-flow__minimap .react-flow__minimap-node,
 .react-flow__minimap .minimap-node {
   opacity: 1 !important;
-  stroke-width: 2 !important;
+  fill-opacity: 0.95 !important;
+  stroke-opacity: 0.95 !important;
+  stroke-width: 1.8 !important;
 }
 
 .react-flow__minimap-mask {
-  fill-opacity: 0.2 !important;
+  fill-opacity: 0.22 !important;
 }
 
 .react-flow__controls {

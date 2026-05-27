@@ -161,6 +161,18 @@ function endpointNodeID(componentID: string, localNodeName: string, portName?: s
   return `${componentID}::node::${localNodeName}`
 }
 
+function minimapNodeFill(node: Node<NodeData>, theme: 'light' | 'dark'): string {
+  const navType = node.data?.navType
+  if (navType === 'module') return theme === 'dark' ? '#7ea8cf' : '#356287'
+  if (navType === 'package') return theme === 'dark' ? '#d8ad7f' : '#8c5a2f'
+  if (navType === 'file') return theme === 'dark' ? '#93c8a3' : '#326f56'
+  if (navType === 'component') return theme === 'dark' ? '#e3ba8d' : '#9a6734'
+  if (navType === 'interface') return theme === 'dark' ? '#94b6dd' : '#44698e'
+  if (navType === 'type') return theme === 'dark' ? '#86bfd6' : '#2f6f97'
+  if (navType === 'const') return theme === 'dark' ? '#e6c58a' : '#8a5a2a'
+  return theme === 'dark' ? '#9ca6b5' : '#566276'
+}
+
 function formatEndpointLabel(endpoint: { node?: string; port?: string }): string {
   const baseName = endpoint.node === 'in' || endpoint.node === 'out' ? '' : (endpoint.node ?? '')
   if (baseName.length > 0 && endpoint.port && endpoint.port.length > 0) {
@@ -716,21 +728,18 @@ export function GraphCanvas({
         }}
       >
         <MiniMap
+          key={`minimap-${theme}`}
           pannable
           zoomable
-          nodeClassName={(node) => `minimap-node ${node.className ?? ''}`}
-          nodeColor={(node) => {
-            if (node.className?.includes('rf-node-kind-interface')) return theme === 'dark' ? '#aab2c0' : '#4f5e72'
-            if (node.className?.includes('rf-node-kind-type')) return theme === 'dark' ? '#8bc2e2' : '#2f6f97'
-            if (node.className?.includes('rf-node-kind-const')) return theme === 'dark' ? '#e5b889' : '#8a5a2a'
-            if (node.className?.includes('rf-node-kind-file')) return theme === 'dark' ? '#95cfb3' : '#2d7f5b'
-            if (node.className?.includes('rf-node-clickable')) return theme === 'dark' ? '#efc18f' : '#8c5a2f'
-            return theme === 'dark' ? '#9ea7b6' : '#556172'
-          }}
-          nodeStrokeColor={theme === 'dark' ? '#c9ced6' : '#4a4f57'}
+          nodeClassName="minimap-node"
+          nodeColor={(node) => minimapNodeFill(node as Node<NodeData>, theme)}
+          nodeStrokeColor={theme === 'dark' ? '#d6dbe3' : '#3f4650'}
           nodeStrokeWidth={2}
           nodeBorderRadius={4}
-          maskColor={theme === 'dark' ? 'rgba(20, 22, 28, 0.18)' : 'rgba(255, 255, 255, 0.2)'}
+          bgColor={theme === 'dark' ? '#3b414c' : '#d3d8e0'}
+          maskColor={theme === 'dark' ? 'rgba(8, 10, 14, 0.22)' : 'rgba(255, 255, 255, 0.22)'}
+          maskStrokeColor={theme === 'dark' ? '#e1e6ef' : '#3f4650'}
+          maskStrokeWidth={1.25}
         />
         <Controls />
         <Background />
