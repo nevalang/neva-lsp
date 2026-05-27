@@ -718,10 +718,12 @@ export function GraphCanvas({
         <MiniMap
           pannable
           zoomable
+          nodeClassName={(node) => `minimap-node ${node.className ?? ''}`}
           nodeColor={(node) => {
             if (node.className?.includes('rf-node-kind-interface')) return theme === 'dark' ? '#8f95a3' : '#9098a4'
             if (node.className?.includes('rf-node-kind-type')) return theme === 'dark' ? '#7fa6c2' : '#7b9db5'
             if (node.className?.includes('rf-node-kind-const')) return theme === 'dark' ? '#d0a06f' : '#bf8a57'
+            if (node.className?.includes('rf-node-kind-file')) return theme === 'dark' ? '#7fb59a' : '#6a9f83'
             if (node.className?.includes('rf-node-clickable')) return theme === 'dark' ? '#d19a66' : '#b97f4a'
             return theme === 'dark' ? '#818998' : '#969eaa'
           }}
