@@ -530,6 +530,16 @@ export function GraphCanvas({
   const [flow, setFlow] = useState<ReactFlowInstance<Node<NodeData>, Edge> | null>(null)
   const [layoutVersion, setLayoutVersion] = useState(0)
   const [copyDone, setCopyDone] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark'
+    }
+    return 'light'
+  })
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
 
   useEffect(() => {
     setSelectedEdgeID(null)
@@ -645,8 +655,16 @@ export function GraphCanvas({
         <div className="canvas-nav-buttons">
           <button onClick={onGoBack} disabled={!canGoBack}>←</button>
           <button onClick={onGoForward} disabled={!canGoForward}>→</button>
+          <button
+            className="canvas-theme-toggle"
+            onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+          >
+            {theme === 'light' ? '🌙' : '☀️'}
+          </button>
           <button className="canvas-copy-url" onClick={() => void copyCurrentURL()} title="Copy URL">
-            {copyDone ? 'ok' : 'copy'}
+            {copyDone ? '✅' : '📋'}
           </button>
         </div>
         <div className="canvas-breadcrumbs">
@@ -683,7 +701,7 @@ export function GraphCanvas({
           }
         }}
       >
-        <MiniMap />
+        <MiniMap pannable zoomable />
         <Controls />
         <Background />
       </ReactFlow>
