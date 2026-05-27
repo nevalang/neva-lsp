@@ -12,6 +12,38 @@ type Breadcrumb = {
   route: Route
 }
 
+function normalizeLegacyModulePath(modulePath: string): string {
+  return modulePath.replace(/^std@(?:v?\d[\w.-]*)$/, 'std')
+}
+
+function normalizeLegacyFileID(fileID: string): string {
+  return fileID.replace(/\/module\/std@(?:v?\d[\w.-]*)\//, '/module/std/')
+}
+
+function parseFileID(fileID: string): { modulePath: string; packageName: string; fileName: string } {
+  const parts = fileID.split('/')
+  const moduleIdx = parts.indexOf('module')
+  const packageIdx = parts.indexOf('package')
+  const fileIdx = parts.indexOf('file')
+  return {
+    modulePath: moduleIdx >= 0 ? (parts[moduleIdx + 1] ?? '') : '',
+    packageName: packageIdx >= 0 ? (parts[packageIdx + 1] ?? '') : '',
+    fileName: fileIdx >= 0 ? (parts[fileIdx + 1] ?? '') : '',
+  }
+}
+
+function displayModuleLabel(modulePath: string): string {
+  if (modulePath === '@') {
+    return modulePath
+  }
+  return modulePath.replace(/@(?:v?\d[\w.-]*)$/, '')
+}
+
+function displayEntityName(rawID: string): string {
+  const last = rawID.split('/').pop() ?? rawID
+  return last.replace(/@\d+$/, '')
+}
+
 function parseHashRoute(): Route {
   const hash = window.location.hash.replace(/^#/, '')
   if (!hash) {
@@ -24,7 +56,7 @@ function parseHashRoute(): Route {
   if (kind === 'module') {
     const modulePath = params.get('m')
     if (modulePath) {
-      return { kind: 'module', modulePath }
+      return { kind: 'module', modulePath: normalizeLegacyModulePath(modulePath) }
     }
   }
 
@@ -32,14 +64,14 @@ function parseHashRoute(): Route {
     const modulePath = params.get('m')
     const packageName = params.get('p')
     if (modulePath && packageName) {
-      return { kind: 'package', modulePath, packageName }
+      return { kind: 'package', modulePath: normalizeLegacyModulePath(modulePath), packageName }
     }
   }
 
   if (kind === 'file') {
     const fileId = params.get('f')
     if (fileId) {
-      return { kind: 'file', fileId }
+      return { kind: 'file', fileId: normalizeLegacyFileID(fileId) }
     }
   }
 
@@ -47,7 +79,11 @@ function parseHashRoute(): Route {
     const fileId = params.get('f')
     const componentId = params.get('c')
     if (fileId && componentId) {
-      return { kind: 'component', fileId, componentId }
+      return {
+        kind: 'component',
+        fileId: normalizeLegacyFileID(fileId),
+        componentId: normalizeLegacyFileID(componentId),
+      }
     }
   }
 
@@ -95,17 +131,12 @@ function routeFileID(route: Route): string | null {
 }
 
 function fileDisplayName(fileID: string): string {
-  const parts = fileID.split('/')
-  const moduleIdx = parts.indexOf('module')
-  const packageIdx = parts.indexOf('package')
-  const fileIdx = parts.indexOf('file')
-
-  const modulePath = moduleIdx >= 0 ? parts[moduleIdx + 1] : ''
-  const packageName = packageIdx >= 0 ? parts[packageIdx + 1] : ''
-  const fileName = fileIdx >= 0 ? parts[fileIdx + 1] : ''
-
-  if (modulePath && packageName && fileName) {
-    return `${modulePath}/${packageName}/${fileName}.neva`
+  const { packageName, fileName } = parseFileID(fileID)
+  if (packageName && fileName) {
+    return `${packageName}/${fileName}.neva`
+  }
+  if (fileName) {
+    return `${fileName}.neva`
   }
 
   return fileID
@@ -140,6 +171,18 @@ export function App() {
         window.history.replaceState({}, '', routeToHash(fallback))
       })
   }, [route, fileCache, modules])
+
+  useEffect(() => {
+    if (modules.length === 0) {
+      return
+    }
+    if (routeExistsInProgram(route, modules)) {
+      return
+    }
+    const fallback = inferInitialRoute(modules)
+    setRoute(fallback)
+    window.history.replaceState({}, '', routeToHash(fallback))
+  }, [route, modules])
 
   useEffect(() => {
     function onPopState() {
@@ -226,40 +269,36 @@ export function App() {
     if (route.kind === 'module') {
       return [
         { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
-        { key: `module:${route.modulePath}`, label: route.modulePath, route },
+        { key: `module:${route.modulePath}`, label: displayModuleLabel(route.modulePath), route },
       ]
     }
 
     if (route.kind === 'package') {
       return [
         { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
-        { key: `module:${route.modulePath}`, label: route.modulePath, route: { kind: 'module', modulePath: route.modulePath } },
+        { key: `module:${route.modulePath}`, label: displayModuleLabel(route.modulePath), route: { kind: 'module', modulePath: route.modulePath } },
         { key: `package:${route.modulePath}:${route.packageName}`, label: route.packageName, route },
       ]
     }
 
     if (route.kind === 'file') {
       const fileID = route.fileId
-      const parts = fileID.split('/')
-      const modulePath = parts[parts.indexOf('module') + 1] ?? ''
-      const packageName = parts[parts.indexOf('package') + 1] ?? ''
+      const { modulePath, packageName } = parseFileID(fileID)
       return [
         { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
-        { key: `module:${modulePath}`, label: modulePath, route: { kind: 'module', modulePath } },
+        { key: `module:${modulePath}`, label: displayModuleLabel(modulePath), route: { kind: 'module', modulePath } },
         { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
         { key: `file:${fileID}`, label: fileDisplayName(fileID), route },
       ]
     }
 
     const fileID = route.fileId
-    const parts = fileID.split('/')
-    const modulePath = parts[parts.indexOf('module') + 1] ?? ''
-    const packageName = parts[parts.indexOf('package') + 1] ?? ''
-    const componentName = route.componentId.split('/').pop() ?? route.componentId
+    const { modulePath, packageName } = parseFileID(fileID)
+    const componentName = displayEntityName(route.componentId)
 
     return [
       { key: 'modules', label: 'Modules', route: { kind: 'modules' } },
-      { key: `module:${modulePath}`, label: modulePath, route: { kind: 'module', modulePath } },
+      { key: `module:${modulePath}`, label: displayModuleLabel(modulePath), route: { kind: 'module', modulePath } },
       { key: `package:${modulePath}:${packageName}`, label: packageName, route: { kind: 'package', modulePath, packageName } },
       { key: `file:${fileID}`, label: fileDisplayName(fileID), route: { kind: 'file', fileId: fileID } },
       { key: `component:${route.componentId}`, label: componentName, route },

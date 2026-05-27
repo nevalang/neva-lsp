@@ -1,28 +1,40 @@
 :root {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  --bg: #f3f4f6;
-  --surface: #ffffff;
-  --surface-muted: #f9fafb;
-  --surface-overlay: rgba(255, 255, 255, 0.92);
-  --text: #111827;
-  --text-muted: #4b5563;
-  --border: #d1d5db;
-  --strong-border: #374151;
-  --hover-border: #2563eb;
+  --bg: #f4f3f0;
+  --surface: #fcfbf8;
+  --surface-muted: #f3f1ec;
+  --surface-overlay: rgba(252, 251, 248, 0.92);
+  --text: #2f343d;
+  --text-muted: #68707d;
+  --border: #cfd3d9;
+  --strong-border: #8b949f;
+  --hover-border: #5f9dcf;
   --shadow-hover: 0 10px 24px rgba(15, 23, 42, 0.14);
+  --accent-warm: #c58b52;
+  --accent-cool: #5f9dcf;
+  --minimap-node: #9aa3ad;
+  --minimap-node-clickable: #c58b52;
+  --minimap-node-stroke: #4a4f57;
+  --minimap-mask: rgba(245, 245, 245, 0.7);
 }
 
 :root[data-theme='dark'] {
-  --bg: #0b1220;
-  --surface: #0f172a;
-  --surface-muted: #111827;
-  --surface-overlay: rgba(15, 23, 42, 0.92);
-  --text: #e5e7eb;
-  --text-muted: #9ca3af;
-  --border: #334155;
-  --strong-border: #64748b;
-  --hover-border: #60a5fa;
-  --shadow-hover: 0 12px 28px rgba(2, 6, 23, 0.5);
+  --bg: #282c34;
+  --surface: #2f343f;
+  --surface-muted: #353b45;
+  --surface-overlay: rgba(47, 52, 63, 0.92);
+  --text: #d7dae0;
+  --text-muted: #a7adb7;
+  --border: #4a5260;
+  --strong-border: #6f7785;
+  --hover-border: #61afef;
+  --shadow-hover: 0 12px 28px rgba(0, 0, 0, 0.4);
+  --accent-warm: #d19a66;
+  --accent-cool: #61afef;
+  --minimap-node: #7d8694;
+  --minimap-node-clickable: #d19a66;
+  --minimap-node-stroke: #c9ced6;
+  --minimap-mask: rgba(26, 29, 36, 0.58);
 }
 
 body {
@@ -96,13 +108,22 @@ button:disabled {
 
 .canvas-nav-buttons {
   display: flex;
-  gap: 4px;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .canvas-nav-buttons button {
   width: 32px;
   text-align: center;
   padding: 4px 0;
+}
+
+.canvas-nav-left,
+.canvas-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .canvas-nav-buttons .canvas-copy-url {
@@ -132,10 +153,30 @@ button:disabled {
 .canvas-breadcrumbs {
   margin-top: 6px;
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.canvas-breadcrumbs-links {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  color: var(--text-muted);
+}
+
+.canvas-breadcrumbs .canvas-copy-url {
+  flex-shrink: 0;
+  width: 30px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0;
+  border-color: var(--accent-warm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .breadcrumb-link {
@@ -236,6 +277,8 @@ button:disabled {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border));
 }
 
 .rf-port-pill-bottom {
@@ -243,6 +286,8 @@ button:disabled {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   box-shadow: 0 -1px 0 rgba(15, 23, 42, 0.04);
+  background: color-mix(in srgb, var(--accent-warm) 16%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border));
 }
 
 .rf-port-name {
@@ -279,4 +324,54 @@ button:disabled {
   background: var(--surface-overlay);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.react-flow__controls {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.15);
+}
+
+.react-flow__controls-button {
+  background: var(--surface);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--surface-muted);
+  color: var(--accent-cool);
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.react-flow__node.rf-node-kind-module .rf-node {
+  border-left: 3px solid color-mix(in srgb, var(--accent-cool) 78%, var(--strong-border));
+}
+
+.react-flow__node.rf-node-kind-package .rf-node {
+  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 72%, var(--strong-border));
+}
+
+.react-flow__node.rf-node-kind-file .rf-node {
+  border-left: 3px solid color-mix(in srgb, var(--accent-cool) 44%, var(--strong-border));
+}
+
+.react-flow__node.rf-node-kind-component .rf-node {
+  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 58%, var(--strong-border));
+}
+
+.react-flow__node.rf-node-kind-interface .rf-node {
+  border-left: 3px solid color-mix(in srgb, var(--accent-cool) 64%, var(--strong-border));
+}
+
+.react-flow__node.rf-node-kind-type .rf-node {
+  border-left: 3px solid color-mix(in srgb, #8ac6a5 65%, var(--strong-border));
+}
+
+.react-flow__node.rf-node-kind-const .rf-node {
+  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 90%, var(--strong-border));
 }

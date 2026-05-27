@@ -202,7 +202,7 @@ function moduleNodes(modules: ModuleSummary[]): Node<NodeData>[] {
   return modules.map((mod) => ({
     id: `module:${mod.path}`,
     type: 'entityNode',
-    className: 'rf-node-clickable',
+    className: 'rf-node-clickable rf-node-kind-module',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav',
@@ -221,7 +221,7 @@ function packageNodes(modules: ModuleSummary[], modulePath: string): Node<NodeDa
   return moduleItem.packages.map((pkg) => ({
     id: `package:${modulePath}:${pkg.name}`,
     type: 'entityNode',
-    className: 'rf-node-clickable',
+    className: 'rf-node-clickable rf-node-kind-package',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav',
@@ -242,7 +242,7 @@ function fileNodes(modules: ModuleSummary[], modulePath: string, packageName: st
   return pkg.fileSummaries.map((file) => ({
     id: `file:${file.id}`,
     type: 'entityNode',
-    className: 'rf-node-clickable',
+    className: 'rf-node-clickable rf-node-kind-file',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav',
@@ -263,7 +263,7 @@ function fileEntityNodes(file: FileView): Node<NodeData>[] {
   const components = file.components.map((component) => ({
     id: `entity:${component.id}`,
     type: 'entityNode' as const,
-    className: canDrillComponent(component) ? 'rf-node-clickable' : undefined,
+    className: canDrillComponent(component) ? 'rf-node-clickable rf-node-kind-component' : 'rf-node-kind-component',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav' as const,
@@ -282,6 +282,7 @@ function fileEntityNodes(file: FileView): Node<NodeData>[] {
   const interfaces = file.interfaces.map((iface) => ({
     id: `entity:${iface.id}`,
     type: 'entityNode' as const,
+    className: 'rf-node-kind-interface',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav' as const,
@@ -299,6 +300,7 @@ function fileEntityNodes(file: FileView): Node<NodeData>[] {
   const types = file.types.map((item) => ({
     id: `entity:${item.id}`,
     type: 'entityNode' as const,
+    className: 'rf-node-kind-type',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav' as const,
@@ -314,6 +316,7 @@ function fileEntityNodes(file: FileView): Node<NodeData>[] {
   const consts = file.consts.map((item) => ({
     id: `entity:${item.id}`,
     type: 'entityNode' as const,
+    className: 'rf-node-kind-const',
     position: { x: 0, y: 0 },
     data: {
       kind: 'nav' as const,
@@ -405,7 +408,7 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
     result.push({
       id: endpointNodeID(component.id, node.name),
       type: 'entityNode',
-      className: node.resolvedRef?.fileId && node.resolvedRef?.entityId ? 'rf-node-clickable' : undefined,
+      className: node.resolvedRef?.fileId && node.resolvedRef?.entityId ? 'rf-node-clickable rf-node-kind-call' : 'rf-node-kind-call',
       position: { x: 0, y: 0 },
       data: {
         kind: 'entity',
@@ -653,27 +656,38 @@ export function GraphCanvas({
     <section className="canvas-shell">
       <div className="canvas-overlay">
         <div className="canvas-nav-buttons">
-          <button onClick={onGoBack} disabled={!canGoBack}>←</button>
-          <button onClick={onGoForward} disabled={!canGoForward}>→</button>
-          <button
-            className="canvas-theme-toggle"
-            onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')}
-            title={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-            aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-          >
-            {theme === 'light' ? '🌙' : '☀️'}
-          </button>
-          <button className="canvas-copy-url" onClick={() => void copyCurrentURL()} title="Copy URL">
-            {copyDone ? '✅' : '📋'}
-          </button>
+          <div className="canvas-nav-left">
+            <button onClick={onGoBack} disabled={!canGoBack}>←</button>
+            <button onClick={onGoForward} disabled={!canGoForward}>→</button>
+          </div>
+          <div className="canvas-nav-right">
+            <button
+              className="canvas-theme-toggle"
+              onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')}
+              title={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+              aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            >
+              {theme === 'light' ? '🌙' : '☀️'}
+            </button>
+          </div>
         </div>
         <div className="canvas-breadcrumbs">
-          {breadcrumbs.map((crumb, index) => (
-            <span key={crumb.key}>
-              <button className="breadcrumb-link" onClick={() => onNavigate(crumb.route, true)}>{crumb.label}</button>
-              {index < breadcrumbs.length - 1 ? <span className="breadcrumb-sep"> / </span> : null}
-            </span>
-          ))}
+          <div className="canvas-breadcrumbs-links">
+            {breadcrumbs.map((crumb, index) => (
+              <span key={crumb.key}>
+                <button className="breadcrumb-link" onClick={() => onNavigate(crumb.route, true)}>{crumb.label}</button>
+                {index < breadcrumbs.length - 1 ? <span className="breadcrumb-sep"> / </span> : null}
+              </span>
+            ))}
+          </div>
+          <button
+            className="canvas-copy-url"
+            onClick={() => void copyCurrentURL()}
+            title="Copy URL"
+            aria-label="Copy URL"
+          >
+            {copyDone ? '✅' : '📋'}
+          </button>
         </div>
       </div>
 
@@ -701,7 +715,20 @@ export function GraphCanvas({
           }
         }}
       >
-        <MiniMap pannable zoomable />
+        <MiniMap
+          pannable
+          zoomable
+          nodeColor={(node) => {
+            if (node.className?.includes('rf-node-kind-interface')) return theme === 'dark' ? '#8f95a3' : '#9098a4'
+            if (node.className?.includes('rf-node-kind-type')) return theme === 'dark' ? '#7fa6c2' : '#7b9db5'
+            if (node.className?.includes('rf-node-kind-const')) return theme === 'dark' ? '#d0a06f' : '#bf8a57'
+            if (node.className?.includes('rf-node-clickable')) return theme === 'dark' ? '#d19a66' : '#b97f4a'
+            return theme === 'dark' ? '#818998' : '#969eaa'
+          }}
+          nodeStrokeColor={theme === 'dark' ? '#c9ced6' : '#4a4f57'}
+          nodeBorderRadius={4}
+          maskColor={theme === 'dark' ? 'rgba(26, 29, 36, 0.58)' : 'rgba(245, 245, 245, 0.7)'}
+        />
         <Controls />
         <Background />
       </ReactFlow>
