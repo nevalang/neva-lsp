@@ -202,12 +202,16 @@ button:disabled {
 
 .rf-node {
   position: relative;
+  overflow: visible;
+  padding: 0;
+  min-width: 240px;
+}
+
+.rf-node-frame {
   overflow: hidden;
   border: 1px solid var(--strong-border);
   background: var(--surface);
   border-radius: 8px;
-  padding: 0;
-  min-width: 240px;
 }
 
 .react-flow__node.rf-node-clickable .rf-node,
@@ -215,7 +219,7 @@ button:disabled {
   cursor: pointer;
 }
 
-.react-flow__node.rf-node-clickable:hover .rf-node,
+.react-flow__node.rf-node-clickable:hover .rf-node-frame,
 .react-flow__node.rf-node-clickable:hover .rf-port-node {
   border-color: var(--hover-border);
   box-shadow: var(--shadow-hover);

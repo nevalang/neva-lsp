@@ -109,20 +109,40 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
 
   return (
     <div className={`rf-node${showPortBars && hasInPorts ? ' rf-node-has-inbars' : ''}${showPortBars && hasOutPorts ? ' rf-node-has-outbars' : ''}`}>
-      {showPortBars && hasInPorts && (
-        <div className="rf-node-port-row rf-node-port-row-top">
-          {data.inPorts?.map((port, idx) => (
-            <span
-              key={`in-pill-${port.name}`}
-              className="rf-port-pill rf-port-pill-top"
-              style={{ left: inHandles[idx], width: `${100 / (data.inPorts?.length || 1)}%` }}
-            >
-              <span className="rf-port-name">{port.name}</span>
-              {port.type ? <span className="rf-port-type">{port.type}</span> : null}
-            </span>
-          ))}
+      <div className="rf-node-frame">
+        {showPortBars && hasInPorts && (
+          <div className="rf-node-port-row rf-node-port-row-top">
+            {data.inPorts?.map((port, idx) => (
+              <span
+                key={`in-pill-${port.name}`}
+                className="rf-port-pill rf-port-pill-top"
+                style={{ left: inHandles[idx], width: `${100 / (data.inPorts?.length || 1)}%` }}
+              >
+                <span className="rf-port-name">{port.name}</span>
+                {port.type ? <span className="rf-port-type">{port.type}</span> : null}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="rf-node-body">
+          <div className="rf-node-title">{data.label}</div>
+          {data.showMeta && data.subtitle && <div className="rf-node-subtitle">{data.subtitle}</div>}
         </div>
-      )}
+        {showPortBars && hasOutPorts && (
+          <div className="rf-node-port-row rf-node-port-row-bottom">
+            {data.outPorts?.map((port, idx) => (
+              <span
+                key={`out-pill-${port.name}`}
+                className="rf-port-pill rf-port-pill-bottom"
+                style={{ left: outHandles[idx], width: `${100 / (data.outPorts?.length || 1)}%` }}
+              >
+                <span className="rf-port-name">{port.name}</span>
+                {data.showMeta && port.type ? <span className="rf-port-type">{port.type}</span> : null}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
       {inHandles.map((left, idx) => (
         <Handle
           key={`en-in-${idx}`}
@@ -132,10 +152,6 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           style={showPortBars ? { ...inputHandleStyle, left } : { left }}
         />
       ))}
-      <div className="rf-node-body">
-        <div className="rf-node-title">{data.label}</div>
-        {data.showMeta && data.subtitle && <div className="rf-node-subtitle">{data.subtitle}</div>}
-      </div>
       {outHandles.map((left, idx) => (
         <Handle
           key={`en-out-${idx}`}
@@ -145,20 +161,6 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           style={showPortBars ? { ...outputHandleStyle, left } : { left }}
         />
       ))}
-      {showPortBars && hasOutPorts && (
-        <div className="rf-node-port-row rf-node-port-row-bottom">
-          {data.outPorts?.map((port, idx) => (
-            <span
-              key={`out-pill-${port.name}`}
-              className="rf-port-pill rf-port-pill-bottom"
-              style={{ left: outHandles[idx], width: `${100 / (data.outPorts?.length || 1)}%` }}
-            >
-              <span className="rf-port-name">{port.name}</span>
-              {data.showMeta && port.type ? <span className="rf-port-type">{port.type}</span> : null}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
