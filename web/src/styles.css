@@ -410,30 +410,30 @@ button:disabled {
   color: #a9b1bf !important;
 }
 
-.react-flow__node.rf-node-kind-module .rf-node {
-  border-left: 3px solid color-mix(in srgb, var(--accent-cool) 78%, var(--strong-border));
+.react-flow__node.rf-node-kind-module .rf-node-frame {
+  border-left: 2px solid color-mix(in srgb, var(--accent-cool) 58%, var(--strong-border));
 }
 
-.react-flow__node.rf-node-kind-package .rf-node {
-  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 72%, var(--strong-border));
+.react-flow__node.rf-node-kind-package .rf-node-frame {
+  border-left: 2px solid color-mix(in srgb, var(--accent-warm) 56%, var(--strong-border));
 }
 
-.react-flow__node.rf-node-kind-file .rf-node {
-  border-left: 3px solid color-mix(in srgb, #8ac6a5 74%, var(--strong-border));
+.react-flow__node.rf-node-kind-file .rf-node-frame {
+  border-left: 2px solid color-mix(in srgb, #8ac6a5 56%, var(--strong-border));
 }
 
-.react-flow__node.rf-node-kind-component .rf-node {
-  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 58%, var(--strong-border));
+.react-flow__node.rf-node-kind-component .rf-node-frame {
+  border-left: 2px solid color-mix(in srgb, var(--accent-warm) 46%, var(--strong-border));
 }
 
-.react-flow__node.rf-node-kind-interface .rf-node {
-  border-left: 3px solid color-mix(in srgb, var(--accent-cool) 64%, var(--strong-border));
+.react-flow__node.rf-node-kind-interface .rf-node-frame {
+  border-left: 2px solid color-mix(in srgb, var(--accent-cool) 48%, var(--strong-border));
 }
 
-.react-flow__node.rf-node-kind-type .rf-node {
-  border-left: 3px solid color-mix(in srgb, #8ac6a5 65%, var(--strong-border));
+.react-flow__node.rf-node-kind-type .rf-node-frame {
+  border-left: 2px solid color-mix(in srgb, #8ac6a5 48%, var(--strong-border));
 }
 
-.react-flow__node.rf-node-kind-const .rf-node {
-  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 90%, var(--strong-border));
+.react-flow__node.rf-node-kind-const .rf-node-frame {
+  border-left: 2px solid color-mix(in srgb, var(--accent-warm) 64%, var(--strong-border));
 }

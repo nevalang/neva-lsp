@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Background,
   Controls,
@@ -104,6 +104,7 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
   const showPortBars = Boolean(data.showMeta)
   const hasInPorts = (data.inPorts?.length ?? 0) > 0
   const hasOutPorts = (data.outPorts?.length ?? 0) > 0
+  const showConnectionHandles = data.kind === 'entity'
   const inputHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2, top: showPortBars ? 0 : undefined }
   const outputHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2, bottom: showPortBars ? 0 : undefined }
 
@@ -143,7 +144,7 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           </div>
         )}
       </div>
-      {inHandles.map((left, idx) => (
+      {showConnectionHandles && inHandles.map((left, idx) => (
         <Handle
           key={`en-in-${idx}`}
           id={handleIDForPort(data.inPorts?.[idx]?.name ?? `in-${idx}`)}
@@ -152,7 +153,7 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           style={showPortBars ? { ...inputHandleStyle, left } : { left }}
         />
       ))}
-      {outHandles.map((left, idx) => (
+      {showConnectionHandles && outHandles.map((left, idx) => (
         <Handle
           key={`en-out-${idx}`}
           id={handleIDForPort(data.outPorts?.[idx]?.name ?? `out-${idx}`)}
@@ -662,10 +663,7 @@ export function GraphCanvas({
         const component = file.components.find((item) => item.id === route.componentId)
         if (component) {
           nextNodes = componentDetailNodes(component, true)
-          nextEdges = componentDetailEdges(component).map((edge) => ({
-            ...edge,
-            label: edge.id === selectedEdgeID ? edge.label : '',
-          }))
+          nextEdges = componentDetailEdges(component)
           direction = 'DOWN'
         }
       }
@@ -682,7 +680,12 @@ export function GraphCanvas({
     return () => {
       canceled = true
     }
-  }, [modules, route, file, selectedEdgeID])
+  }, [modules, route, file])
+
+  const displayedEdges = useMemo(() => edges.map((edge) => ({
+    ...edge,
+    label: edge.id === selectedEdgeID ? edge.label : '',
+  })), [edges, selectedEdgeID])
 
   const onEdgeClick: EdgeMouseHandler = (_, edge) => {
     setSelectedEdgeID(edge.id)
@@ -758,7 +761,7 @@ export function GraphCanvas({
 
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={displayedEdges}
         defaultEdgeOptions={{
           type: 'step',
           style: { strokeWidth: 1.5 },
