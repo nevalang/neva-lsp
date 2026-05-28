@@ -70,7 +70,7 @@ func registerViewAPI(mux *http.ServeMux, build *ast.Build, manifestCurrent manif
 			http.Error(w, "missing id", http.StatusBadRequest)
 			return
 		}
-		fileView, ok := view.ProjectFileByID(*build, fileID)
+		fileView, ok := projectFileView(*build, fileID)
 		if !ok {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return

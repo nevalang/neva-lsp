@@ -14,7 +14,7 @@ import {
 } from '@xyflow/react'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { endpointPortName, inferImplicitPortName, parseSignaturePorts, shouldAddImplicitErrEdge, shouldAddImplicitInputEdge } from '../lib/graphSemantics'
-import type { Component, FileView, ModuleSummary, Port } from '../lib/types'
+import type { Component, Endpoint, FileView, ModuleSummary, Port } from '../lib/types'
 
 type Route =
   | { kind: 'modules' }
@@ -44,7 +44,7 @@ type Props = {
 }
 
 type NodeData = {
-  kind: 'entity' | 'port' | 'nav'
+  kind: 'entity' | 'port' | 'nav' | 'const'
   navType?: 'module' | 'package' | 'file' | 'component' | 'interface' | 'type' | 'const'
   portRole?: 'in' | 'out'
   label: string
@@ -77,6 +77,17 @@ function handleIDForPort(portName: string): string {
 }
 
 function EntityNode({ data }: NodeProps<Node<NodeData>>) {
+  if (data.kind === 'const') {
+    return (
+      <div className="rf-const-node">
+        <Handle type="target" position={Position.Top} style={{ left: '50%' }} />
+        <div className="rf-node-title">{data.label}</div>
+        {data.subtitle ? <div className="rf-node-subtitle">{data.subtitle}</div> : null}
+        <Handle type="source" position={Position.Bottom} style={{ left: '50%' }} />
+      </div>
+    )
+  }
+
   if (data.kind === 'port') {
     return (
       <div className="rf-port-node">
@@ -161,6 +172,10 @@ function endpointNodeID(componentID: string, localNodeName: string, portName?: s
   return `${componentID}::node::${localNodeName}`
 }
 
+function constNodeID(componentID: string, endpoint: Endpoint): string {
+  return `${componentID}::const::${endpoint.constType ?? ''}::${endpoint.constValue ?? ''}`
+}
+
 function minimapNodeFill(node: Node<NodeData>, theme: 'light' | 'dark'): string {
   const navType = node.data?.navType
   if (navType === 'module') return theme === 'dark' ? '#7ea8cf' : '#356287'
@@ -195,7 +210,10 @@ function normalizeEdgeLabel(label: string): string {
     .trim()
 }
 
-function resolveNodeID(component: Component, endpoint: { node?: string; port?: string }): string | null {
+function resolveNodeID(component: Component, endpoint: Endpoint): string | null {
+  if (endpoint.kind === 'const') {
+    return constNodeID(component.id, endpoint)
+  }
   if (!endpoint.node) {
     return null
   }
@@ -347,8 +365,15 @@ function fileEntityNodes(file: FileView): Node<NodeData>[] {
 function componentDetailNodes(component: Component, showMeta: boolean): Node<NodeData>[] {
   const result: Node<NodeData>[] = []
   const nodePortKinds = new Map<string, { in: Map<string, string>; out: Map<string, string> }>()
+  const constNodes = new Map<string, Endpoint>()
 
   for (const connection of component.connections) {
+    if (connection.sender?.kind === 'const') {
+      constNodes.set(constNodeID(component.id, connection.sender), connection.sender)
+    }
+    if (connection.receiver?.kind === 'const') {
+      constNodes.set(constNodeID(component.id, connection.receiver), connection.receiver)
+    }
     if (connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out') {
       const item = nodePortKinds.get(connection.sender.node) ?? { in: new Map<string, string>(), out: new Map<string, string>() }
       const portName = endpointPortName(component, connection.sender, 'out')
@@ -394,6 +419,21 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
     for (const [name, t] of parsed.out.entries()) {
       if (ports.out.has(name)) ports.out.set(name, t)
     }
+  }
+
+  for (const [id, endpoint] of constNodes.entries()) {
+    result.push({
+      id,
+      type: 'entityNode',
+      className: 'rf-node-kind-literal',
+      position: { x: 0, y: 0 },
+      data: {
+        kind: 'const',
+        label: endpoint.constValue ?? '?',
+        subtitle: endpoint.constType,
+        showMeta,
+      },
+    })
   }
 
   for (const port of component.inPorts) {
@@ -461,6 +501,7 @@ function componentDetailEdges(component: Component): Edge[] {
     if (!source || !target) continue
     result.push({
       id: connection.id,
+      type: 'step',
       source,
       target,
       sourceHandle: connection.sender?.node && connection.sender.node !== 'in' && connection.sender.node !== 'out'
@@ -478,6 +519,7 @@ function componentDetailEdges(component: Component): Edge[] {
     if (shouldAddImplicitInputEdge(component, node.name, inferredInPort)) {
       result.push({
         id: `${component.id}/implicit_in/${inferredInPort}->${node.name}`,
+        type: 'step',
         source: endpointNodeID(component.id, 'in', inferredInPort),
         target: endpointNodeID(component.id, node.name),
         targetHandle: handleIDForPort(inferredInPort),
@@ -489,6 +531,7 @@ function componentDetailEdges(component: Component): Edge[] {
     }
     result.push({
       id: `${component.id}/implicit_err/${node.name}`,
+      type: 'step',
       source: endpointNodeID(component.id, node.name),
       target: endpointNodeID(component.id, 'out', 'err'),
       sourceHandle: handleIDForPort('err'),
@@ -504,10 +547,15 @@ async function applyLayout(nodes: Node<NodeData>[], edges: Edge[], direction: 'D
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': direction,
-      'elk.spacing.nodeNode': '40',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '58',
+      'elk.spacing.nodeNode': '56',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '76',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '30',
     },
-    children: nodes.map((node) => ({ id: node.id, width: node.data.kind === 'port' ? 120 : 320, height: node.data.kind === 'port' ? 70 : 120 })),
+    children: nodes.map((node) => ({
+      id: node.id,
+      width: node.data.kind === 'port' ? 120 : node.data.kind === 'const' ? 92 : 320,
+      height: node.data.kind === 'port' ? 70 : node.data.kind === 'const' ? 72 : 120,
+    })),
     edges: edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
   }
 
@@ -706,6 +754,10 @@ export function GraphCanvas({
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        defaultEdgeOptions={{
+          type: 'step',
+          style: { strokeWidth: 1.5 },
+        }}
         nodeTypes={nodeTypes}
         nodesDraggable
         fitView

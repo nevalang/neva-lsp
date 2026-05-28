@@ -52,6 +52,7 @@ export type Endpoint = {
   node?: string
   port?: string
   idx?: number | null
+  index?: number | null
   kind?: string
   constType?: string
   constValue?: string

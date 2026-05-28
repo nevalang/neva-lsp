@@ -78,29 +78,35 @@ function normalizeEndpoint(endpoint: Partial<Endpoint> | undefined): Endpoint {
   return {
     node: endpoint?.node,
     port: endpoint?.port,
-    idx: endpoint?.idx ?? null,
+    idx: endpoint?.idx ?? (endpoint as any)?.index ?? null,
     kind: endpoint?.kind,
     constType: endpoint?.constType,
     constValue: endpoint?.constValue,
   }
 }
 
-function normalizeConnection(raw: any): Connection {
+function normalizeConnections(raw: any): Connection[] {
   if (raw && Array.isArray(raw.senders) && Array.isArray(raw.receivers) && raw.senders.length > 0 && raw.receivers.length > 0) {
-    return {
-      id: raw.id ?? '',
-      sender: normalizeEndpoint(raw.senders[0]),
-      receiver: normalizeEndpoint(raw.receivers[0]),
-      signature: raw.signature,
+    const expanded: Connection[] = []
+    for (let si = 0; si < raw.senders.length; si++) {
+      for (let ri = 0; ri < raw.receivers.length; ri++) {
+        expanded.push({
+          id: `${raw.id ?? ''}#${si}:${ri}`,
+          sender: normalizeEndpoint(raw.senders[si]),
+          receiver: normalizeEndpoint(raw.receivers[ri]),
+          signature: raw.signature,
+        })
+      }
     }
+    return expanded
   }
 
-  return {
+  return [{
     id: raw?.id ?? '',
     sender: normalizeEndpoint(raw?.sender),
     receiver: normalizeEndpoint(raw?.receiver),
     signature: raw?.signature,
-  }
+  }]
 }
 
 function normalizeComponent(raw: any): Component {
@@ -110,7 +116,7 @@ function normalizeComponent(raw: any): Component {
     inPorts: (raw?.inPorts ?? raw?.inports ?? []).map((port: Port) => normalizePort(port)),
     outPorts: (raw?.outPorts ?? raw?.outports ?? []).map((port: Port) => normalizePort(port)),
     nodes: (raw?.nodes ?? []).map((node: NodeItem) => normalizeNode(node)),
-    connections: (raw?.connections ?? []).map((connection: any) => normalizeConnection(connection)),
+    connections: (raw?.connections ?? []).flatMap((connection: any) => normalizeConnections(connection)),
     anchor: raw?.anchor,
   }
 }

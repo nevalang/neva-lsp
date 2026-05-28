@@ -3,6 +3,18 @@ import type { Component, FileView } from './types'
 export function parsePortList(raw: string, knownNames: string[]): Map<string, string> {
   const result = new Map<string, string>()
   const known = [...knownNames].sort((a, b) => b.length - a.length)
+  const compactTypeStarts = ['stream<', 'error', 'string', 'float', 'bool', 'int', 'any']
+
+  function splitCompactToken(item: string): { name: string; type: string } | null {
+    for (const marker of compactTypeStarts) {
+      const idx = item.indexOf(marker)
+      if (idx > 0) {
+        return { name: item.slice(0, idx), type: item.slice(idx) }
+      }
+    }
+    return null
+  }
+
   for (const chunk of raw.split(',')) {
     const item = chunk.trim()
     if (!item) continue
@@ -16,6 +28,12 @@ export function parsePortList(raw: string, knownNames: string[]): Map<string, st
     if (!name) {
       const fallback = item.match(/^([A-Za-z_][A-Za-z0-9_]*)(.*)$/)
       if (!fallback) continue
+      const compact = splitCompactToken(item)
+      if (compact) {
+        name = compact.name
+        result.set(name, compact.type.trim())
+        continue
+      }
       name = fallback[1]
     }
     const type = item.slice(name.length).trim()

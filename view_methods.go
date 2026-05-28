@@ -30,7 +30,7 @@ func (s *Server) GetFileView(_ *glsp.Context, params GetFileViewRequest) (any, e
 		return nil, errors.New("program index is not ready")
 	}
 
-	fileView, found := view.ProjectFileByID(*build, params.FileID)
+	fileView, found := projectFileView(*build, params.FileID)
 	if !found {
 		return nil, fmt.Errorf("file not found: %s", params.FileID)
 	}
