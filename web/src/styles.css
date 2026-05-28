@@ -206,7 +206,7 @@ button:disabled {
   border: 1px solid var(--strong-border);
   background: var(--surface);
   border-radius: 8px;
-  padding: 12px 12px 10px;
+  padding: 0;
   min-width: 240px;
 }
 
@@ -222,14 +222,10 @@ button:disabled {
   transform: translateY(-1px);
 }
 
-.rf-node.rf-node-has-inbars {
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-}
-
-.rf-node.rf-node-has-outbars {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
+.rf-node-body {
+  min-height: 72px;
+  padding: 12px 12px 10px;
+  box-sizing: border-box;
 }
 
 .rf-node-title {
@@ -245,69 +241,64 @@ button:disabled {
 }
 
 .rf-node-port-row {
-  position: absolute;
-  left: 0;
+  position: relative;
   width: 100%;
+  display: flex;
   pointer-events: none;
 }
 
 .rf-node-port-row-top {
-  top: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-cool) 42%, var(--border));
 }
 
 .rf-node-port-row-bottom {
-  bottom: 0;
+  border-top: 1px solid color-mix(in srgb, var(--accent-warm) 46%, var(--border));
 }
 
 .rf-port-pill {
-  position: absolute;
-  transform: translateX(-50%);
+  position: static;
   display: inline-flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
+  border: 0;
   background: var(--surface);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 6px 10px;
   box-sizing: border-box;
   white-space: nowrap;
 }
 
 .rf-port-pill-top {
-  transform: translate(-50%, -100%);
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border));
 }
 
-.rf-node-port-row-top .rf-port-pill-top:not(:first-child) {
-  border-top-left-radius: 0;
+.rf-node-port-row-top .rf-port-pill-top:first-child {
+  border-top-left-radius: 7px;
+}
+
+.rf-node-port-row-top .rf-port-pill-top:last-child {
+  border-top-right-radius: 7px;
 }
 
 .rf-node-port-row-top .rf-port-pill-top:not(:last-child) {
-  border-top-right-radius: 0;
-  border-right-width: 0;
+  border-right: 1px solid color-mix(in srgb, var(--accent-cool) 42%, var(--border));
 }
 
 .rf-port-pill-bottom {
-  transform: translateX(-50%);
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-  box-shadow: 0 -1px 0 rgba(15, 23, 42, 0.04);
   background: color-mix(in srgb, var(--accent-warm) 16%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border));
 }
 
-.rf-node-port-row-bottom .rf-port-pill-bottom:not(:first-child) {
-  border-bottom-left-radius: 0;
+.rf-node-port-row-bottom .rf-port-pill-bottom:first-child {
+  border-bottom-left-radius: 7px;
+}
+
+.rf-node-port-row-bottom .rf-port-pill-bottom:last-child {
+  border-bottom-right-radius: 7px;
 }
 
 .rf-node-port-row-bottom .rf-port-pill-bottom:not(:last-child) {
-  border-bottom-right-radius: 0;
-  border-right-width: 0;
+  border-right: 1px solid color-mix(in srgb, var(--accent-warm) 46%, var(--border));
 }
 
 .rf-port-name {
@@ -322,7 +313,7 @@ button:disabled {
 }
 
 .rf-port-pill .rf-port-type {
-  margin-left: 6px;
+  margin-left: 0;
 }
 
 .rf-port-node {

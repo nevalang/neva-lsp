@@ -104,7 +104,7 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
   const showPortBars = Boolean(data.showMeta)
   const hasInPorts = (data.inPorts?.length ?? 0) > 0
   const hasOutPorts = (data.outPorts?.length ?? 0) > 0
-  const hiddenHandleStyle = { opacity: 0, pointerEvents: 'none' as const }
+  const portHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2 }
 
   return (
     <div className={`rf-node${showPortBars && hasInPorts ? ' rf-node-has-inbars' : ''}${showPortBars && hasOutPorts ? ' rf-node-has-outbars' : ''}`}>
@@ -128,18 +128,20 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           id={handleIDForPort(data.inPorts?.[idx]?.name ?? `in-${idx}`)}
           type="target"
           position={Position.Top}
-          style={showPortBars ? { ...hiddenHandleStyle, left } : { left }}
+          style={showPortBars ? { ...portHandleStyle, left } : { left }}
         />
       ))}
-      <div className="rf-node-title">{data.label}</div>
-      {data.showMeta && data.subtitle && <div className="rf-node-subtitle">{data.subtitle}</div>}
+      <div className="rf-node-body">
+        <div className="rf-node-title">{data.label}</div>
+        {data.showMeta && data.subtitle && <div className="rf-node-subtitle">{data.subtitle}</div>}
+      </div>
       {outHandles.map((left, idx) => (
         <Handle
           key={`en-out-${idx}`}
           id={handleIDForPort(data.outPorts?.[idx]?.name ?? `out-${idx}`)}
           type="source"
           position={Position.Bottom}
-          style={showPortBars ? { ...hiddenHandleStyle, left } : { left }}
+          style={showPortBars ? { ...portHandleStyle, left } : { left }}
         />
       ))}
       {showPortBars && hasOutPorts && (
@@ -547,8 +549,8 @@ async function applyLayout(nodes: Node<NodeData>[], edges: Edge[], direction: 'D
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': direction,
-      'elk.spacing.nodeNode': '56',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '76',
+      'elk.spacing.nodeNode': '72',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
       'elk.layered.spacing.edgeNodeBetweenLayers': '30',
     },
     children: nodes.map((node) => ({
