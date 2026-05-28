@@ -1,6 +1,7 @@
 import type {
   Component,
   Connection,
+  DINode,
   Endpoint,
   FileView,
   Interface,
@@ -59,7 +60,21 @@ function normalizePort(port: Partial<Port>): Port {
   return {
     name: port.name ?? '',
     type: port.type,
+    order: typeof port.order === 'number' ? port.order : undefined,
     array: Boolean(port.array),
+  }
+}
+
+function normalizeDINode(node: Partial<DINode>): DINode {
+  return {
+    id: node.id ?? '',
+    name: node.name ?? '',
+    nodeName: node.nodeName,
+    entityRef: node.entityRef,
+    resolvedRef: node.resolvedRef,
+    typeArgs: node.typeArgs ?? [],
+    anchor: node.anchor,
+    errGuard: Boolean(node.errGuard),
   }
 }
 
@@ -69,6 +84,7 @@ function normalizeNode(node: Partial<NodeItem>): NodeItem {
     name: node.name ?? '',
     entityRef: node.entityRef,
     resolvedRef: node.resolvedRef,
+    diArgs: (node.diArgs ?? []).map((item) => normalizeDINode(item)),
     anchor: node.anchor,
     errGuard: Boolean((node as any).errGuard),
   }
@@ -131,7 +147,7 @@ function normalizeInterface(raw: any): Interface {
   }
 }
 
-function normalizeFile(file: any): FileView {
+export function normalizeFile(file: any): FileView {
   return {
     id: file?.id ?? '',
     name: file?.name ?? '',

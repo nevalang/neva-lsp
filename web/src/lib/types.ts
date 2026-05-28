@@ -36,7 +36,19 @@ export type ResolvedRef = {
 export type Port = {
   name: string
   type?: string
+  order?: number
   array?: boolean
+}
+
+export type DINode = {
+  id: string
+  name: string
+  nodeName?: string
+  entityRef?: unknown
+  resolvedRef?: ResolvedRef
+  typeArgs?: string[]
+  anchor?: SourceAnchor
+  errGuard?: boolean
 }
 
 export type NodeItem = {
@@ -44,6 +56,7 @@ export type NodeItem = {
   name: string
   entityRef?: unknown
   resolvedRef?: ResolvedRef
+  diArgs?: DINode[]
   anchor?: SourceAnchor
   errGuard?: boolean
 }

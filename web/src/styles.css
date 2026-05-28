@@ -244,6 +244,51 @@ button:disabled {
   word-break: break-all;
 }
 
+.rf-di-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rf-di-node {
+  width: 100%;
+  min-height: 26px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 38%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-warm) 12%, var(--surface));
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.rf-di-node:disabled {
+  cursor: default;
+}
+
+.rf-di-node-clickable {
+  cursor: pointer;
+}
+
+.rf-di-node-clickable:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 64%, var(--hover-border));
+  background: color-mix(in srgb, var(--accent-warm) 18%, var(--surface));
+}
+
+.rf-di-slot {
+  color: var(--text-muted);
+}
+
+.rf-di-target {
+  font-weight: 700;
+}
+
 .rf-node-port-row {
   position: relative;
   width: 100%;

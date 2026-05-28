@@ -5,9 +5,10 @@ go 1.26
 toolchain go1.26.3
 
 require (
-	github.com/nevalang/neva v0.37.1
+	github.com/nevalang/neva v0.37.2-0.20260528203050-0e10040527f3
 	github.com/tliron/commonlog v0.2.10
 	github.com/tliron/glsp v0.2.2
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -48,5 +49,4 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/term v0.37.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

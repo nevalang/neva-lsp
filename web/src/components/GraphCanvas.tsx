@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { MouseEvent } from 'react'
 import {
   Background,
   Controls,
@@ -14,7 +15,7 @@ import {
 } from '@xyflow/react'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { endpointPortName, inferImplicitPortName, parseSignaturePorts, shouldAddImplicitErrEdge, shouldAddImplicitInputEdge } from '../lib/graphSemantics'
-import type { Component, Endpoint, FileView, ModuleSummary, Port } from '../lib/types'
+import type { Component, DINode, Endpoint, FileView, ModuleSummary, Port, ResolvedRef } from '../lib/types'
 
 type Route =
   | { kind: 'modules' }
@@ -52,6 +53,8 @@ type NodeData = {
   showMeta?: boolean
   inPorts?: Port[]
   outPorts?: Port[]
+  diArgs?: DINode[]
+  onOpenEntity?: (target: { fileId: string; entityId: string }) => void
   fileId?: string
   entityId?: string
   modulePath?: string
@@ -107,6 +110,16 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
   const showConnectionHandles = data.kind === 'entity'
   const inputHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2, top: showPortBars ? 0 : undefined }
   const outputHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2, bottom: showPortBars ? 0 : undefined }
+  const diArgs = data.diArgs ?? []
+
+  function openDIArg(event: MouseEvent<HTMLButtonElement>, diArg: DINode) {
+    event.stopPropagation()
+    const ref = diArg.resolvedRef
+    if (!ref?.fileId || !ref.entityId) {
+      return
+    }
+    data.onOpenEntity?.({ fileId: ref.fileId, entityId: ref.entityId })
+  }
 
   return (
     <div className={`rf-node${showPortBars && hasInPorts ? ' rf-node-has-inbars' : ''}${showPortBars && hasOutPorts ? ' rf-node-has-outbars' : ''}`}>
@@ -128,6 +141,27 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
         <div className="rf-node-body">
           <div className="rf-node-title">{data.label}</div>
           {data.showMeta && data.subtitle && <div className="rf-node-subtitle">{data.subtitle}</div>}
+          {diArgs.length > 0 ? (
+            <div className="rf-di-list" aria-label="Dependency injections">
+              {diArgs.map((diArg) => {
+                const clickable = Boolean(diArg.resolvedRef?.fileId && diArg.resolvedRef?.entityId)
+                const label = diDisplayName(diArg)
+                return (
+                  <button
+                    key={diArg.id || `${diArg.name}:${label}`}
+                    type="button"
+                    className={`rf-di-node${clickable ? ' rf-di-node-clickable' : ''}`}
+                    onClick={(event) => openDIArg(event, diArg)}
+                    disabled={!clickable}
+                    title={clickable ? `Open ${label}` : label}
+                  >
+                    {diArg.name ? <span className="rf-di-slot">{diArg.name}:</span> : null}
+                    <span className="rf-di-target">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
         {showPortBars && hasOutPorts && (
           <div className="rf-node-port-row rf-node-port-row-bottom">
@@ -167,6 +201,33 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
 }
 
 const nodeTypes = { entityNode: EntityNode }
+
+function entityRefName(entityRef: unknown): string {
+  if (!entityRef || typeof entityRef !== 'object') {
+    return ''
+  }
+  const raw = entityRef as Record<string, unknown>
+  const pkg = typeof raw.pkg === 'string' ? raw.pkg : ''
+  const name = typeof raw.name === 'string' ? raw.name : ''
+  return pkg && name ? `${pkg}.${name}` : name
+}
+
+function resolvedRefName(ref: ResolvedRef | undefined): string {
+  const text = ref?.anchor?.text?.trim()
+  if (text) {
+    const match = text.match(/^([A-Za-z_][A-Za-z0-9_]*)/)
+    if (match) return match[1]
+  }
+  const canonical = ref?.canonicalRef
+  if (!canonical) {
+    return ''
+  }
+  return canonical.split('/').at(-1) ?? canonical
+}
+
+function diDisplayName(diArg: DINode): string {
+  return entityRefName(diArg.entityRef) || resolvedRefName(diArg.resolvedRef) || diArg.nodeName || diArg.name || '?'
+}
 
 function endpointNodeID(componentID: string, localNodeName: string, portName?: string): string {
   if (localNodeName === 'in') {
@@ -295,6 +356,31 @@ function canDrillComponent(component: Component): boolean {
   return component.nodes.length > 0 || component.connections.length > 0
 }
 
+function orderedPortList(portMap: Map<string, string> | undefined, parsedPorts: Map<string, string>): Port[] {
+  if (!portMap) {
+    return []
+  }
+  const seen = new Set<string>()
+  const result: Port[] = []
+
+  for (const [name, parsedType] of parsedPorts.entries()) {
+    if (!portMap.has(name)) {
+      continue
+    }
+    seen.add(name)
+    result.push({ name, type: portMap.get(name) || parsedType })
+  }
+
+  for (const [name, type] of portMap.entries()) {
+    if (seen.has(name)) {
+      continue
+    }
+    result.push({ name, type })
+  }
+
+  return result
+}
+
 function fileEntityNodes(file: FileView): Node<NodeData>[] {
   const components = file.components.map((component) => ({
     id: `entity:${component.id}`,
@@ -368,7 +454,11 @@ function fileEntityNodes(file: FileView): Node<NodeData>[] {
   return [...components, ...interfaces, ...types, ...consts]
 }
 
-function componentDetailNodes(component: Component, showMeta: boolean): Node<NodeData>[] {
+function componentDetailNodes(
+  component: Component,
+  showMeta: boolean,
+  onOpenEntity?: (target: { fileId: string; entityId: string }) => void,
+): Node<NodeData>[] {
   const result: Node<NodeData>[] = []
   const nodePortKinds = new Map<string, { in: Map<string, string>; out: Map<string, string> }>()
   const constNodes = new Map<string, Endpoint>()
@@ -459,10 +549,13 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
 
   for (const node of component.nodes) {
     const ref = node.resolvedRef
-    const localRef = (node.entityRef && typeof node.entityRef === 'object') ? (node.entityRef as Record<string, unknown>) : null
-    const pkg = typeof localRef?.pkg === 'string' ? localRef.pkg : ''
-    const name = typeof localRef?.name === 'string' ? localRef.name : ''
-    const sourceLikeRef = pkg && name ? `${pkg}.${name}` : (name || ref?.canonicalRef)
+    const sourceLikeRef = entityRefName(node.entityRef) || ref?.canonicalRef
+    const ports = nodePortKinds.get(node.name)
+    const parsed = parseSignaturePorts(
+      node.resolvedRef?.anchor?.text,
+      Array.from(ports?.in.keys() ?? []),
+      Array.from(ports?.out.keys() ?? []),
+    )
     result.push({
       id: endpointNodeID(component.id, node.name),
       type: 'entityNode',
@@ -473,8 +566,10 @@ function componentDetailNodes(component: Component, showMeta: boolean): Node<Nod
         label: node.name,
         subtitle: sourceLikeRef,
         showMeta,
-        inPorts: Array.from(nodePortKinds.get(node.name)?.in.entries() ?? []).map(([name, type]) => ({ name, type })),
-        outPorts: Array.from(nodePortKinds.get(node.name)?.out.entries() ?? []).map(([name, type]) => ({ name, type })),
+        inPorts: orderedPortList(ports?.in, parsed.in),
+        outPorts: orderedPortList(ports?.out, parsed.out),
+        diArgs: node.diArgs,
+        onOpenEntity,
         fileId: ref?.fileId,
         entityId: ref?.entityId,
       },
@@ -548,6 +643,12 @@ function componentDetailEdges(component: Component): Edge[] {
 }
 
 async function applyLayout(nodes: Node<NodeData>[], edges: Edge[], direction: 'DOWN' | 'RIGHT' = 'DOWN'): Promise<Node<NodeData>[]> {
+  function layoutHeight(node: Node<NodeData>): number {
+    if (node.data.kind === 'port') return 70
+    if (node.data.kind === 'const') return 72
+    return 120 + (node.data.diArgs?.length ?? 0) * 30
+  }
+
   const graph = {
     id: 'root',
     layoutOptions: {
@@ -560,7 +661,7 @@ async function applyLayout(nodes: Node<NodeData>[], edges: Edge[], direction: 'D
     children: nodes.map((node) => ({
       id: node.id,
       width: node.data.kind === 'port' ? 120 : node.data.kind === 'const' ? 92 : 320,
-      height: node.data.kind === 'port' ? 70 : node.data.kind === 'const' ? 72 : 120,
+      height: layoutHeight(node),
     })),
     edges: edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
   }
@@ -662,7 +763,9 @@ export function GraphCanvas({
 
         const component = file.components.find((item) => item.id === route.componentId)
         if (component) {
-          nextNodes = componentDetailNodes(component, true)
+          nextNodes = componentDetailNodes(component, true, (target) => {
+            onNavigate({ kind: 'component', fileId: target.fileId, componentId: target.entityId }, true)
+          })
           nextEdges = componentDetailEdges(component)
           direction = 'DOWN'
         }
