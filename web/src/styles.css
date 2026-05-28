@@ -202,7 +202,7 @@ button:disabled {
 
 .rf-node {
   position: relative;
-  overflow: visible;
+  overflow: hidden;
   border: 1px solid var(--strong-border);
   background: var(--surface);
   border-radius: 8px;
@@ -274,11 +274,11 @@ button:disabled {
 }
 
 .rf-node-port-row-top .rf-port-pill-top:first-child {
-  border-top-left-radius: 7px;
+  border-top-left-radius: 8px;
 }
 
 .rf-node-port-row-top .rf-port-pill-top:last-child {
-  border-top-right-radius: 7px;
+  border-top-right-radius: 8px;
 }
 
 .rf-node-port-row-top .rf-port-pill-top:not(:last-child) {
@@ -290,11 +290,11 @@ button:disabled {
 }
 
 .rf-node-port-row-bottom .rf-port-pill-bottom:first-child {
-  border-bottom-left-radius: 7px;
+  border-bottom-left-radius: 8px;
 }
 
 .rf-node-port-row-bottom .rf-port-pill-bottom:last-child {
-  border-bottom-right-radius: 7px;
+  border-bottom-right-radius: 8px;
 }
 
 .rf-node-port-row-bottom .rf-port-pill-bottom:not(:last-child) {

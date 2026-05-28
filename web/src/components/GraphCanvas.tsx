@@ -104,7 +104,8 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
   const showPortBars = Boolean(data.showMeta)
   const hasInPorts = (data.inPorts?.length ?? 0) > 0
   const hasOutPorts = (data.outPorts?.length ?? 0) > 0
-  const portHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2 }
+  const inputHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2, top: showPortBars ? 0 : undefined }
+  const outputHandleStyle = { opacity: 1, pointerEvents: 'none' as const, zIndex: 2, bottom: showPortBars ? 0 : undefined }
 
   return (
     <div className={`rf-node${showPortBars && hasInPorts ? ' rf-node-has-inbars' : ''}${showPortBars && hasOutPorts ? ' rf-node-has-outbars' : ''}`}>
@@ -128,7 +129,7 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           id={handleIDForPort(data.inPorts?.[idx]?.name ?? `in-${idx}`)}
           type="target"
           position={Position.Top}
-          style={showPortBars ? { ...portHandleStyle, left } : { left }}
+          style={showPortBars ? { ...inputHandleStyle, left } : { left }}
         />
       ))}
       <div className="rf-node-body">
@@ -141,7 +142,7 @@ function EntityNode({ data }: NodeProps<Node<NodeData>>) {
           id={handleIDForPort(data.outPorts?.[idx]?.name ?? `out-${idx}`)}
           type="source"
           position={Position.Bottom}
-          style={showPortBars ? { ...portHandleStyle, left } : { left }}
+          style={showPortBars ? { ...outputHandleStyle, left } : { left }}
         />
       ))}
       {showPortBars && hasOutPorts && (
