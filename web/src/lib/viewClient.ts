@@ -94,6 +94,7 @@ function normalizeEndpoint(endpoint: Partial<Endpoint> | undefined): Endpoint {
   return {
     node: endpoint?.node,
     port: endpoint?.port,
+    selector: Array.isArray((endpoint as any)?.selector) ? (endpoint as any).selector : [],
     idx: endpoint?.idx ?? (endpoint as any)?.index ?? null,
     kind: endpoint?.kind,
     constType: endpoint?.constType,

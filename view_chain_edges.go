@@ -76,9 +76,14 @@ func addChainTriggersFromReceivers(
 			continue
 		}
 		chained := receiver.ChainedConnection
+		nextOuterSenders := make([]ast.ConnectionSender, 0, len(outerSenders)*len(chained.Senders))
 		for _, outerSender := range outerSenders {
 			source := endpointFromConnectionSender(outerSender)
 			for _, chainHead := range chained.Senders {
+				nextOuterSenders = append(nextOuterSenders, mergeChainSender(outerSender, chainHead))
+				if !isConcreteConnectionSender(chainHead) {
+					continue
+				}
 				target := endpointFromConnectionSender(chainHead)
 				key := connectionEndpointKey(source) + "->" + connectionEndpointKey(target)
 				if _, found := existing[key]; found {
@@ -98,9 +103,22 @@ func addChainTriggersFromReceivers(
 				nextOrdinal++
 			}
 		}
-		nextOrdinal = addChainTriggersFromReceivers(componentView, existing, nextOrdinal, chained.Senders, chained.Receivers, chained.Meta, depth+1)
+		nextOrdinal = addChainTriggersFromReceivers(componentView, existing, nextOrdinal, nextOuterSenders, chained.Receivers, chained.Meta, depth+1)
 	}
 	return nextOrdinal
+}
+
+func isConcreteConnectionSender(sender ast.ConnectionSender) bool {
+	return sender.PortAddr != nil || sender.Const != nil
+}
+
+func mergeChainSender(outer ast.ConnectionSender, chained ast.ConnectionSender) ast.ConnectionSender {
+	merged := chained
+	if !isConcreteConnectionSender(merged) {
+		merged = outer
+	}
+	merged.StructSelector = append(append([]string{}, outer.StructSelector...), chained.StructSelector...)
+	return merged
 }
 
 func endpointFromConnectionSender(sender ast.ConnectionSender) view.ConnectionEndpoint {

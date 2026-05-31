@@ -64,6 +64,7 @@ export type NodeItem = {
 export type Endpoint = {
   node?: string
   port?: string
+  selector?: string[]
   idx?: number | null
   index?: number | null
   kind?: string

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import {
   Background,
@@ -9,7 +9,6 @@ import {
   ReactFlow,
   type ReactFlowInstance,
   type Edge,
-  type EdgeMouseHandler,
   type Node,
   type NodeProps,
 } from '@xyflow/react'
@@ -255,26 +254,11 @@ function minimapNodeFill(node: Node<NodeData>, theme: 'light' | 'dark'): string 
   return theme === 'dark' ? '#9ca6b5' : '#566276'
 }
 
-function formatEndpointLabel(endpoint: { node?: string; port?: string }): string {
-  const baseName = endpoint.node === 'in' || endpoint.node === 'out' ? '' : (endpoint.node ?? '')
-  if (baseName.length > 0 && endpoint.port && endpoint.port.length > 0) {
-    return `${baseName}:${endpoint.port}`
+function selectorLabel(endpoint: Endpoint): string {
+  if (!endpoint.selector || endpoint.selector.length === 0) {
+    return ''
   }
-  if (endpoint.port && endpoint.port.length > 0) {
-    return endpoint.port
-  }
-  if (baseName.length > 0) {
-    return baseName
-  }
-  return '?'
-}
-
-function normalizeEdgeLabel(label: string): string {
-  return label
-    .replace(/\bin:/g, '')
-    .replace(/\bout:/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return endpoint.selector.map((part) => `.${part}`).join('')
 }
 
 function resolveNodeID(component: Component, endpoint: Endpoint): string | null {
@@ -293,6 +277,25 @@ function resolveNodeID(component: Component, endpoint: Endpoint): string | null 
     return endpointNodeID(component.id, 'out', port)
   }
   return endpointNodeID(component.id, endpoint.node)
+}
+
+function inferSelectorSourceInPort(component: Component): string | null {
+  if (component.inPorts.length === 0) {
+    return null
+  }
+  const explicitlyUsed = new Set<string>()
+  for (const connection of component.connections) {
+    if ((connection.sender?.node ?? '') !== 'in') {
+      continue
+    }
+    const port = (connection.sender?.port ?? '').trim()
+    if (port) explicitlyUsed.add(port)
+  }
+  const candidates = component.inPorts.map((port) => port.name).filter((name) => !explicitlyUsed.has(name))
+  if (candidates.length === 1) {
+    return candidates[0]
+  }
+  return component.inPorts[0]?.name ?? null
 }
 
 function moduleNodes(modules: ModuleSummary[]): Node<NodeData>[] {
@@ -596,8 +599,14 @@ function componentDetailNodes(
 
 function componentDetailEdges(component: Component): Edge[] {
   const result: Edge[] = []
+  const inferredSelectorSourcePort = inferSelectorSourceInPort(component)
   for (const connection of component.connections) {
-    const source = resolveNodeID(component, connection.sender)
+    const sender = connection.sender
+    const senderHasSelector = (sender.selector?.length ?? 0) > 0
+    const senderMissingEndpoint = !(sender.node && sender.node.trim()) && !(sender.port && sender.port.trim())
+    const source = senderHasSelector && senderMissingEndpoint && inferredSelectorSourcePort
+      ? endpointNodeID(component.id, 'in', inferredSelectorSourcePort)
+      : resolveNodeID(component, sender)
     const target = resolveNodeID(component, connection.receiver)
     if (!source || !target) continue
     result.push({
@@ -611,7 +620,7 @@ function componentDetailEdges(component: Component): Edge[] {
       targetHandle: connection.receiver?.node && connection.receiver.node !== 'in' && connection.receiver.node !== 'out'
         ? handleIDForPort(endpointPortName(component, connection.receiver, 'in'))
         : undefined,
-      label: normalizeEdgeLabel(`${formatEndpointLabel(connection.sender)} -> ${formatEndpointLabel(connection.receiver)}`),
+      label: selectorLabel(connection.sender),
     })
   }
 
@@ -643,6 +652,22 @@ function componentDetailEdges(component: Component): Edge[] {
 }
 
 async function applyLayout(nodes: Node<NodeData>[], edges: Edge[], direction: 'DOWN' | 'RIGHT' = 'DOWN'): Promise<Node<NodeData>[]> {
+  function estimatedPortPillWidth(port: Port): number {
+    const nameWidth = (port.name?.length ?? 0) * 8
+    const typeWidth = (port.type?.length ?? 0) * 7
+    const gap = port.type ? 10 : 0
+    return Math.max(92, nameWidth + typeWidth + gap + 24)
+  }
+
+  function layoutWidth(node: Node<NodeData>): number {
+    if (node.data.kind === 'port') return 120
+    if (node.data.kind === 'const') return 92
+
+    const inWidth = (node.data.inPorts ?? []).reduce((sum, port) => sum + estimatedPortPillWidth(port), 0)
+    const outWidth = (node.data.outPorts ?? []).reduce((sum, port) => sum + estimatedPortPillWidth(port), 0)
+    return Math.max(320, inWidth, outWidth)
+  }
+
   function layoutHeight(node: Node<NodeData>): number {
     if (node.data.kind === 'port') return 70
     if (node.data.kind === 'const') return 72
@@ -660,7 +685,7 @@ async function applyLayout(nodes: Node<NodeData>[], edges: Edge[], direction: 'D
     },
     children: nodes.map((node) => ({
       id: node.id,
-      width: node.data.kind === 'port' ? 120 : node.data.kind === 'const' ? 92 : 320,
+      width: layoutWidth(node),
       height: layoutHeight(node),
     })),
     edges: edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
@@ -696,7 +721,6 @@ export function GraphCanvas({
 }: Props) {
   const [nodes, setNodes] = useState<Node<NodeData>[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
-  const [selectedEdgeID, setSelectedEdgeID] = useState<string | null>(null)
   const [flow, setFlow] = useState<ReactFlowInstance<Node<NodeData>, Edge> | null>(null)
   const [layoutVersion, setLayoutVersion] = useState(0)
   const [copyDone, setCopyDone] = useState(false)
@@ -710,10 +734,6 @@ export function GraphCanvas({
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
-
-  useEffect(() => {
-    setSelectedEdgeID(null)
-  }, [route.kind])
 
   useEffect(() => {
     if (!flow || nodes.length === 0 || layoutVersion === 0) {
@@ -785,15 +805,6 @@ export function GraphCanvas({
     }
   }, [modules, route, file])
 
-  const displayedEdges = useMemo(() => edges.map((edge) => ({
-    ...edge,
-    label: edge.id === selectedEdgeID ? edge.label : '',
-  })), [edges, selectedEdgeID])
-
-  const onEdgeClick: EdgeMouseHandler = (_, edge) => {
-    setSelectedEdgeID(edge.id)
-  }
-
   async function copyCurrentURL() {
     try {
       await navigator.clipboard.writeText(window.location.href)
@@ -864,7 +875,7 @@ export function GraphCanvas({
 
       <ReactFlow
         nodes={nodes}
-        edges={displayedEdges}
+        edges={edges}
         defaultEdgeOptions={{
           type: 'step',
           style: { strokeWidth: 1.5 },
@@ -873,8 +884,6 @@ export function GraphCanvas({
         nodesDraggable
         fitView
         onInit={setFlow}
-        onEdgeClick={onEdgeClick}
-        onPaneClick={() => setSelectedEdgeID(null)}
         onNodeClick={(_, node) => {
           const nextRoute = routeDown(route, node)
           if (nextRoute) {

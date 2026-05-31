@@ -37,4 +37,25 @@ describe('viewClient normalization', () => {
       resolvedRef: { entityId: 'p' },
     })
   })
+
+  it('preserves endpoint selectors on normalized connections', () => {
+    const file = normalizeFile({
+      id: 'f',
+      name: 'main',
+      components: [{
+        id: 'c',
+        name: 'Main',
+        inPorts: [],
+        outPorts: [],
+        nodes: [],
+        connections: [{
+          id: 'edge-1',
+          sender: { node: 'in', port: 'state', selector: ['rate'] },
+          receiver: { node: 'mul_rate_balance', port: 'left' },
+        }],
+      }],
+    })
+
+    expect(file.components[0].connections[0].sender.selector).toEqual(['rate'])
+  })
 })
