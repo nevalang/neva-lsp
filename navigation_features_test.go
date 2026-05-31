@@ -83,8 +83,8 @@ def Print2Lines(data int) (res any, err error) {
 }
 
 def PrintFirstLine(data int) (res any, err error) {
-	p1 fmt.Println?
-	p2 fmt.Println?
+	p1 fmt.Println<string>?
+	p2 fmt.Println<string>?
 	p3 fmt.Printf?
 	switch Switch<int>
 	---
@@ -101,9 +101,9 @@ def PrintFirstLine(data int) (res any, err error) {
 }
 
 def PrintSecondLine(data int) (res any, err error) {
-	p1 fmt.Println?
-	p2 fmt.Println?
-	p3 fmt.Println?
+	p1 fmt.Println<string>?
+	p2 fmt.Println<string>?
+	p3 fmt.Println<string>?
 	p4 fmt.Printf?
 	switch Switch<int>
 	---
